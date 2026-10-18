@@ -5,7 +5,7 @@ in the app; places removed there disappear from it. Three pieces share the work:
 
 | Piece | Runs | Does |
 |---|---|---|
-| `.github/workflows/food-sync.yml` | GitHub Actions, daily 13:17 UTC + manual | `food/sync.py`: diff the collection, add new places as **provisional** records, drop removed ones, re-seal `docs/data/food.bin`, commit `food: sync collection (+N/−M)` |
+| `.github/workflows/food-sync.yml` | GitHub Actions, manual only (list is final) | `food/sync.py`: diff the collection, add new places as **provisional** records, drop removed ones, re-seal `docs/data/food.bin`, commit `food: sync collection (+N/−M)` |
 | `food/enrich_mac.sh` | your Mac, by hand (or from a scheduled task) | sync again, read pending places in Chrome, run `assemble.mjs`, seal, commit, push |
 | Claude scheduled task | your Mac | writes AI notes `food/ai/<alias>.json` for places listed in `food/ai_needed.json` |
 

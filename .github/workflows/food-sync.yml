@@ -1,4 +1,6 @@
-# Daily: keep docs/data/food.bin in step with the Yelp collection (the source of truth).
+# On demand: bring docs/data/food.bin in step with the Yelp collection (the source of truth).
+# The list is considered final for the trip, so there is no schedule; run it from the
+# Actions tab (or food/enrich_mac.sh on the Mac) if places are added later.
 # New places land as provisional records ("pending_details": true) that the Mac path
 # (food/enrich_mac.sh) later completes; removed places are dropped and tombstoned.
 #
@@ -9,8 +11,6 @@
 name: food sync
 
 on:
-  schedule:
-    - cron: "17 13 * * *"   # 13:17 UTC daily (09:17 New York in October)
   workflow_dispatch:
     inputs:
       dry_run:
