@@ -1,0 +1,21 @@
+# Private: passphrase, derived key, and plaintext trip/food data never go to GitHub.
+.secrets/
+trip/*.json
+guide/*.json
+food/*.json
+food/raw/
+food/ai/
+updater/state/
+updater/out/
+app/test/out/
+node_modules/
+.DS_Store
+research/
+app/dist/
+app/test/fixtures/
+# Dev and test material that names the real flights or dates stays on the Mac.
+.claude/
+app/test/
+app/CONTRACT.md
+updater/sample_status.json
+updater/test_*.py
