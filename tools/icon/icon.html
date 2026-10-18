@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1024">
+<title>nyc. icon</title>
+<!--
+  Home-screen icon for nyc. Renders one variant, 1024x1024 by default.
+    icon.html?v=A   teal field, white wordmark, peach period
+    icon.html?v=B   deep teal field, cream wordmark, rose period   (the pick)
+    icon.html?v=C   cream field, deep teal wordmark, rose period
+    icon.html?v=D   night (ink) field, cream wordmark, period as a "you are here" dot
+  The wordmark is Figtree 800, the same face and weight as the app header (.wm),
+  with the header's tracking (-0.03em).
+  The period is redrawn as a circle at the exact spot the glyph's period sits,
+  so it can take its own colour (and, for D, a ring and halo).
+
+  Other sizes: &size=180 draws the same design straight at 180x180 (the layout is
+  always worked out at 1024, then drawn scaled, so every size matches exactly).
+  Maskable (Android/Chrome): &safe=.76 shrinks the wordmark until every bit of ink
+  sits inside a centred circle that wide (the spec's safe zone is the central 80%).
+
+  Sets <html data-ready="1"> (plus data-box / data-band / data-dot / data-maxr, the
+  final ink box, x-height band, dot and furthest ink from the centre, in 1024 units)
+  once drawn; render.sh / install.sh screenshot it.
+  Checking aids: &guides=1 draws centre lines, the ink box and the 80% safe circle;
+  &nx= / &ny= nudge in px; &track= &gap= &ds= &width= try other values.
+-->
+<style>
+@font-face{font-family:Figtree;src:url(../../app/src/static/fonts/figtree.woff2) format("woff2");font-weight:800;font-display:block}
+html,body{margin:0;padding:0;width:1024px;height:1024px;overflow:hidden;background:#000}
+canvas{display:block;width:1024px;height:1024px}
+</style>
+</head>
+<body>
+<canvas id="c" width="1024" height="1024"></canvas>
+<script>
+(async () => {
+  const S = 1024;   // layout units; the output can be any size
+
+  // Each variant: field gradient stops (top-left -> bottom-right), wordmark colour,
+  // period colour, wordmark ink width as a share of the icon, tracking (em),
+  // extra gap before the period (em), period scale, and an optional location-dot treatment.
+  // gap .035: at 60px the c's lower terminal and the period stay a clear 1.5px apart.
+  const VARIANTS = {
+    A: {field: ['#80A29E', '#6E908C'], ink: '#FDFDFD', dot: '#F6B29E',
+        width: .76, track: -.03, gap: .035, dotScale: 1.12},
+    B: {field: ['#36554F', '#26403D'], ink: '#F2EEE1', dot: '#E3979A',
+        width: .76, track: -.03, gap: .035, dotScale: 1.16},
+    C: {field: ['#F6F3E9', '#ECE6D5'], ink: '#2E4A47', dot: '#C4686B',
+        width: .76, track: -.03, gap: .035, dotScale: 1.12},
+    // D: the field is a radial glow centred on the dot, so the whole icon reads "you are here".
+    D: {field: ['#2B3D3B', '#121716'], glow: true, ink: '#F2EEE1', dot: '#E3979A',
+        width: .72, track: -.03, gap: .07, dotScale: 1.1, mass: 0,
+        locate: {ring: '#F2EEE1', ringW: .26, halo: '227,151,154', haloR: 3.4, haloA: .55, blend: 'screen',
+                 disc: .12, discR: 4.0}},
+  };
+
+  const q = new URLSearchParams(location.search);
+  const key = (q.get('v') || 'B').toUpperCase();
+  const v = {...(VARIANTS[key] || VARIANTS.B)};
+  // Trial overrides, for comparing values side by side.
+  for (const [p, k] of [['track', 'track'], ['gap', 'gap'], ['ds', 'dotScale'], ['width', 'width']]) {
+    if (q.has(p)) v[k] = +q.get(p);
+  }
+  const OUT = Math.round(Math.max(16, Math.min(2048, +(q.get('size') || S))));
+  const SAFE = Math.max(0, Math.min(1, +(q.get('safe') || 0)));
+  document.title = 'nyc. icon ' + key + (OUT !== S ? ' ' + OUT : '') + (SAFE ? ' maskable' : '');
+
+  await document.fonts.load('800 400px Figtree');
+  if (!document.fonts.check('800 400px Figtree')) {
+    document.documentElement.dataset.error = 'font';
+  }
+
+  const font = px => `800 ${px}px Figtree`;
+
+  // Draw text into a scratch canvas and return its alpha channel.
+  function alpha(text, px, x, y, w, h) {
+    const c = new OffscreenCanvas(w, h);
+    const g = c.getContext('2d');
+    g.font = font(px);
+    g.letterSpacing = (v.track * px) + 'px';
+    g.textBaseline = 'alphabetic';
+    g.fillStyle = '#000';
+    g.fillText(text, x, y);
+    const d = g.getImageData(0, 0, w, h).data;
+    const a = new Float32Array(w * h);
+    for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3] / 255;
+    return a;
+  }
+
+  // Ink bounds and alpha-weighted centre of a mask.
+  function stats(a, w, h) {
+    let x0 = w, y0 = h, x1 = -1, y1 = -1, m = 0, sx = 0, sy = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const t = a[y * w + x];
+      if (t > .02) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (t) { m += t; sx += t * x; sy += t * y; }
+    }
+    return {x0, y0, x1: x1 + 1, y1: y1 + 1, m, cx: sx / m, cy: sy / m};
+  }
+
+  // Lay out the word at a given size with its baseline origin at (ox, oy) on a work canvas.
+  function layout(px) {
+    const W = Math.ceil(px * 3.2), H = Math.ceil(px * 1.6), ox = Math.round(px * .3), oy = Math.round(px * 1.1);
+    const word = alpha('nyc', px, ox, oy, W, H);
+    const full = alpha('nyc.', px, ox, oy, W, H);
+    // The period is whatever "nyc." has that "nyc" does not.
+    const dotMask = new Float32Array(full.length);
+    for (let i = 0; i < full.length; i++) dotMask[i] = Math.max(0, full[i] - word[i]);
+    const ws = stats(word, W, H), ds = stats(dotMask, W, H);
+    const r0 = Math.sqrt(ds.m / Math.PI);           // radius of a circle with the period's area
+    const dot = {x: ds.cx + v.gap * px, y: ds.cy, r: r0 * v.dotScale};
+    // Bottom of the period sits on the baseline, like the glyph's.
+    dot.y = ds.cy + r0 - dot.r;
+    // Composite bounds and centre of mass: word plus the circular dot.
+    const dr = dot.r * (1 + (v.locate ? v.locate.ringW : 0));   // outer edge, ring included
+    const dm = Math.PI * dr * dr;
+    const box = {x0: Math.min(ws.x0, dot.x - dr), x1: Math.max(ws.x1, dot.x + dr),
+                 y0: Math.min(ws.y0, dot.y - dr), y1: Math.max(ws.y1, dot.y + dr)};
+    const cx = (ws.cx * ws.m + dot.x * dm) / (ws.m + dm);
+    const cy = (ws.cy * ws.m + dot.y * dm) / (ws.m + dm);
+    // x-height band: top of the n to the baseline.
+    return {px, W, H, word, ox, oy, ws, dot, dr, box, cx, cy, xTop: ws.y0, base: oy};
+  }
+
+  // Optical centre. Horizontal: mostly the ink box, nudged toward the mass (the period is light).
+  // Vertical: halfway between the ink box (which counts the y's descender in full)
+  // and the centre of mass (which barely counts it), lifted a touch above the middle.
+  const mass = v.mass ?? .2;   // D's glow already weights the right side, so it centres on the box alone
+  function place(L) {
+    const hx = (1 - mass) * (L.box.x0 + L.box.x1) / 2 + mass * L.cx;
+    const vy = .5 * (L.box.y0 + L.box.y1) / 2 + .5 * L.cy;
+    return {dx: S / 2 - hx + +(q.get('nx') || 0),      // nx / ny: trial nudges in px
+            dy: S / 2 - S * .002 - vy + +(q.get('ny') || 0)};
+  }
+
+  // Furthest ink (word or dot, ring included) from the icon centre, once placed.
+  function maxR(L, P) {
+    let m = Math.hypot(L.dot.x + P.dx - S / 2, L.dot.y + P.dy - S / 2) + L.dr;
+    for (let y = L.ws.y0; y < L.ws.y1; y++) for (let x = L.ws.x0; x < L.ws.x1; x++) {
+      if (L.word[y * L.W + x] > .02) m = Math.max(m, Math.hypot(x + .5 + P.dx - S / 2, y + .5 + P.dy - S / 2));
+    }
+    return m;
+  }
+
+  // Size so the ink spans the target width, then measure again at that size.
+  const probe = layout(400);
+  let L = layout(400 * (v.width * S) / (probe.box.x1 - probe.box.x0));
+  let P = place(L);
+  // Maskable: shrink until all ink fits the safe circle (a few passes; it converges fast).
+  if (SAFE) {
+    for (let i = 0; i < 4; i++) {
+      const k = (SAFE * S / 2) / maxR(L, P);
+      if (Math.abs(k - 1) < .002) break;
+      L = layout(L.px * k); P = place(L);
+    }
+  }
+  const px = L.px, {dx, dy} = P;
+
+  // Output canvas at the requested size; everything below is drawn in 1024 units.
+  const cv = document.getElementById('c');
+  cv.width = cv.height = OUT;
+  for (const el of [document.documentElement, document.body, cv]) {
+    el.style.width = el.style.height = OUT + 'px';
+  }
+  const g = cv.getContext('2d');
+  const k = OUT / S;
+  g.setTransform(k, 0, 0, k, 0, 0);
+
+  const dot = {x: L.dot.x + dx, y: L.dot.y + dy, r: L.dot.r};
+
+  // Field: full bleed, opaque, a very gentle gradient (diagonal, or radial from the dot).
+  const lg = v.glow
+    ? g.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, S * 1.05)
+    : g.createLinearGradient(0, 0, S, S);
+  lg.addColorStop(0, v.field[0]);
+  lg.addColorStop(1, v.field[1]);
+  g.fillStyle = lg;
+  g.fillRect(0, 0, S, S);
+
+  // D: a soft halo under everything, centred on the dot.
+  if (v.locate) {
+    const R = dot.r * v.locate.haloR;
+    const r0 = dot.r * (1 + v.locate.ringW);
+    const rg = g.createRadialGradient(dot.x, dot.y, r0 * .9, dot.x, dot.y, R);
+    // Roughly Gaussian falloff: bright at the ring, gone well before R.
+    [[0, 1], [.15, .72], [.35, .38], [.6, .13], [.82, .03], [1, 0]].forEach(([t, kk]) =>
+      rg.addColorStop(t, `rgba(${v.locate.halo},${(v.locate.haloA * kk).toFixed(3)})`));
+    g.save();
+    g.globalCompositeOperation = v.locate.blend || 'source-over';
+    // A wide, faint disc like a map's accuracy circle, under the tight glow.
+    if (v.locate.disc) {
+      const DR = dot.r * v.locate.discR;
+      const dg = g.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, DR);
+      [[0, 1], [.7, .85], [.88, .45], [1, 0]].forEach(([t, kk]) =>
+        dg.addColorStop(t, `rgba(${v.locate.halo},${(v.locate.disc * kk).toFixed(3)})`));
+      g.fillStyle = dg;
+      g.beginPath(); g.arc(dot.x, dot.y, DR, 0, Math.PI * 2); g.fill();
+    }
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(dot.x, dot.y, R, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+
+  // Wordmark. letterSpacing is in user space, so the transform scales it with the text.
+  g.font = font(px);
+  g.letterSpacing = (v.track * px) + 'px';
+  g.textBaseline = 'alphabetic';
+  g.fillStyle = v.ink;
+  g.fillText('nyc', L.ox + dx, L.oy + dy);
+
+  // Period.
+  if (v.locate) {
+    const rw = dot.r * v.locate.ringW;
+    g.save();
+    // Shadows ignore the transform, so scale them by hand.
+    g.shadowColor = 'rgba(10,20,20,.28)';
+    g.shadowBlur = dot.r * .5 * k;
+    g.shadowOffsetY = dot.r * .12 * k;
+    g.fillStyle = v.locate.ring;
+    g.beginPath(); g.arc(dot.x, dot.y, dot.r + rw, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  g.fillStyle = v.dot;
+  g.beginPath(); g.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2); g.fill();
+
+  // Debug overlay: icon.html?v=B&guides=1
+  if (q.get('guides')) {
+    g.lineWidth = 1 / k;
+    g.strokeStyle = 'rgba(255,0,0,.6)';
+    g.beginPath(); g.moveTo(S / 2, 0); g.lineTo(S / 2, S); g.moveTo(0, S / 2); g.lineTo(S, S / 2); g.stroke();
+    g.strokeStyle = 'rgba(0,0,255,.6)';
+    g.strokeRect(L.box.x0 + dx, L.box.y0 + dy, L.box.x1 - L.box.x0, L.box.y1 - L.box.y0);
+    g.beginPath(); g.moveTo(0, L.xTop + dy); g.lineTo(S, L.xTop + dy); g.moveTo(0, L.base + dy); g.lineTo(S, L.base + dy); g.stroke();
+    g.strokeStyle = 'rgba(255,200,0,.8)';
+    g.beginPath(); g.arc(S / 2, S / 2, S * .4, 0, Math.PI * 2); g.stroke();
+  }
+
+  document.documentElement.dataset.ready = '1';
+  document.documentElement.dataset.px = px.toFixed(1);
+  // Final ink box, x-height band and dot, for checking margins: --dump-dom shows them.
+  const r = n => Math.round(n);
+  document.documentElement.dataset.box = [L.box.x0 + dx, L.box.y0 + dy, L.box.x1 + dx, L.box.y1 + dy].map(r).join(',');
+  document.documentElement.dataset.band = [L.xTop + dy, L.base + dy].map(r).join(',');
+  document.documentElement.dataset.dot = [dot.x, dot.y, dot.r].map(r).join(',');
+  document.documentElement.dataset.maxr = r(maxR(L, P));
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+# Daily: keep docs/data/food.bin in step with the Yelp collection (the source of truth).
+# New places land as provisional records ("pending_details": true) that the Mac path
+# (food/enrich_mac.sh) later completes; removed places are dropped and tombstoned.
+#
+# Needs the repository secrets TRIP_KEY (base64 AES key, same as .secrets/trip_key.b64)
+# and YELP_COLLECTION (the collection id, kept out of committed files).
+# Yelp often refuses cloud IPs: food/sync.py then exits 75 and this job ends green with
+# a warning annotation instead of failing. Logs carry counts only, never place names.
+name: food sync
+
+on:
+  schedule:
+    - cron: "17 13 * * *"   # 13:17 UTC daily (09:17 New York in October)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fetch and diff only; commit nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write   # only to request a Pages rebuild after a push (see below)
+
+concurrency:
+  group: food-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4   # tools/tripcrypt.mjs; python3 and curl ship with the runner
+        with:
+          node-version: 22
+
+      - name: Sync with the Yelp collection
+        id: sync
+        shell: bash
+        env:
+          TRIP_KEY: ${{ secrets.TRIP_KEY }}
+          YELP_COLLECTION: ${{ secrets.YELP_COLLECTION }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TRIP_KEY:-}" ]; then
+            echo "::error title=food sync::TRIP_KEY secret is not set (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Two attempts: if main moved while we ran (e.g. the Mac path pushed), start
+          # over from the new main rather than merging two sealed binaries.
+          for attempt in 1 2; do
+            out="$RUNNER_TEMP/sync_out_$attempt"
+            : > "$out"
+            set +e
+            GITHUB_OUTPUT="$out" python3 -I food/sync.py --require-bin ${DRY_RUN:+--dry-run}
+            rc=$?
+            set -e
+            # 75 = Yelp blocked or unreachable; sync.py already emitted the ::warning::
+            if [ "$rc" -eq 75 ]; then exit 0; fi
+            if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+
+            if git diff --quiet -- docs/data/food.bin; then
+              echo "food.bin unchanged"
+              exit 0
+            fi
+            added=$(sed -n 's/^added=//p' "$out")
+            removed=$(sed -n 's/^removed=//p' "$out")
+            # commit only the sealed bundle; plaintext under food/ is gitignored anyway
+            git commit -q -m "food: sync collection (+${added:-0}/−${removed:-0})" -- docs/data/food.bin
+            if git push -q origin HEAD:main; then
+              echo "pushed: +${added:-0}/-${removed:-0}"
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::notice title=food sync::push rejected (main moved); syncing again on the new main"
+            git fetch -q origin main
+            git reset -q --hard origin/main
+          done
+          echo "::error title=food sync::could not push after 2 attempts"
+          exit 1
+
+      # Pages publishes main:/docs. A push made with this job's token may not start a Pages
+      # build by itself, so ask for one. Harmless when a build is already queued; when Pages
+      # is set up differently the request fails and only leaves a notice.
+      - name: Request a Pages build
+        if: steps.sync.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null 2>&1 \
+            && echo "requested a Pages build" \
+            || echo "::notice title=food sync::could not request a Pages build; check that the site updated"

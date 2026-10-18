@@ -46,6 +46,25 @@ def terms():
     return out
 
 
+def json_hit(v, rx, bulk=False):
+    """Search a parsed JSON value: every key and string, and numbers that sit
+    in an object or a short list. Long all-number arrays (map coordinates,
+    street graphs) are bulk geodata, where a 4-digit flight number turns up
+    by chance, so their numbers are skipped; their strings still count."""
+    if isinstance(v, str):
+        return bool(rx.search(v))
+    if isinstance(v, bool) or v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return not bulk and bool(rx.search(str(v)))
+    if isinstance(v, dict):
+        return any(rx.search(str(k)) or json_hit(x, rx) for k, x in v.items())
+    if isinstance(v, list):
+        big = len(v) > 16
+        return any(json_hit(x, rx, big) for x in v)
+    return False
+
+
 def main(files):
     t = terms()
     if not t:
@@ -59,6 +78,16 @@ def main(files):
             text = open(f, encoding='utf-8').read()
         except (UnicodeDecodeError, OSError):
             continue
+        if f.endswith('.json'):
+            try:
+                doc = json.loads(text)
+            except ValueError:
+                doc = None
+            if doc is not None:
+                if json_hit(doc, rx):
+                    print(f'scan_public: {f} names the trip in plain text', file=sys.stderr)
+                    bad += 1
+                continue
         for n, line in enumerate(text.splitlines(), 1):
             if rx.search(line):
                 print(f'scan_public: {f}:{n} names the trip in plain text', file=sys.stderr)

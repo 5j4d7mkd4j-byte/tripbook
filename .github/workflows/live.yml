@@ -1,0 +1,55 @@
+# Checks the trip's flights and conditions, then publishes the sealed
+# status.bin to the orphan "live" branch that the app reads.
+# updater/run.py decides whether a run is due (travel windows, slow ticks),
+# so scheduled runs outside the windows end in seconds without any lookups.
+# Logs carry counts only; flight details exist only inside the sealed file.
+name: live status
+
+on:
+  schedule:
+    # Deliberately generic (the repo is public, so no travel dates here):
+    # run.py reads the sealed trip and ends at once outside the windows.
+    - cron: "*/10 * * 10,11 *"   # every 10 min; only travel windows do lookups
+    - cron: "5 */2 * 10,11 *"    # every 2 h: slow mode in the days around the trip
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run even outside the travel windows
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # push to the live branch
+
+concurrency:
+  group: live-status
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check flights and conditions
+        env:
+          TRIP_KEY: ${{ secrets.TRIP_KEY }}
+          # The slow cron is itself the 2-hour tick, so any minute of it counts
+          # (Actions often starts scheduled runs late).
+          SLOW: ${{ github.event.schedule == '5 */2 * 10,11 *' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: |
+          args=(--source actions)
+          if [ "$SLOW" = "true" ]; then args+=(--slow --slow-minutes 120); fi
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          python3 updater/run.py "${args[@]}"
+
+      - name: Publish status.bin
+        run: bash updater/publish.sh

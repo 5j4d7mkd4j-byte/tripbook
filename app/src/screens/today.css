@@ -1,0 +1,142 @@
+/* Today (home). Every selector is .td-prefixed; colours are tokens only. */
+.td>*+*{margin-top:12px}
+.td-a{display:block;text-decoration:none;color:inherit}
+
+/* Heading on the sheet */
+.td-head{margin-bottom:6px}
+.td-head .hl{font-size:36px;line-height:1.04;margin-top:6px;overflow-wrap:anywhere}
+.td-head .hl b{display:inline}
+.td-head .sub{flex-wrap:wrap;row-gap:2px;font-size:14px}
+.td-st{flex-wrap:wrap}
+.td-old{color:var(--rot);font-weight:600}
+.td-src{display:flex;align-items:center;min-height:44px;margin-top:2px;font-size:14px;line-height:1.35;color:var(--mu)}
+.td-src u{text-decoration-color:var(--gh);text-underline-offset:2px}
+
+/* Ticket cards */
+.td-tk{padding:18px 20px}
+.td-tkc{position:relative}
+.td-tkdp{font-size:52px;margin:10px 0 14px}
+.td-tkr{display:flex;gap:12px;align-items:center;min-width:0}
+.td-tkt{font-size:16px;font-weight:800;line-height:1.25}
+.td-tks{font-size:14px;color:var(--mu);margin-top:2px}
+.td-tk .td-st{margin-top:3px}
+.td-sky{right:0;bottom:0;width:132px;height:168px}
+.td-desert{right:0;bottom:0;width:156px;height:164px;
+  -webkit-mask-image:linear-gradient(90deg,transparent 8%,#000 52%);mask-image:linear-gradient(90deg,transparent 8%,#000 52%)}
+.td-moon{fill:var(--cr)}
+/* On tickets the art sits beside the big codes and fades out above the time row. */
+.td-tk .il{top:6px;bottom:auto;right:0;width:124px;height:150px;
+  -webkit-mask-image:linear-gradient(180deg,#000 72%,transparent);mask-image:linear-gradient(180deg,#000 72%,transparent)}
+.td-tk .td-desert{top:0;width:150px;height:156px;
+  -webkit-mask-image:linear-gradient(90deg,transparent 8%,#000 52%),linear-gradient(180deg,#000 74%,transparent);
+  mask-image:linear-gradient(90deg,transparent 8%,#000 52%),linear-gradient(180deg,#000 74%,transparent);
+  -webkit-mask-composite:source-in;mask-composite:intersect}
+
+/* Sand plan cards */
+.td-plan{padding:18px 20px}
+.td-planh{display:flex;gap:10px;align-items:flex-start}
+.td-big{font-size:26px;line-height:1.12;font-weight:800;letter-spacing:-.01em;margin-top:4px;overflow-wrap:anywhere}
+.td-lv{flex:none;margin-top:2px}
+.td-plan .ic,.td-bags .ic,.td-food .ic{flex:none}
+.td-cut{margin:12px 0 0;font-size:15px;font-weight:600;line-height:1.4}
+.td-nw{white-space:nowrap}
+.td-rows{margin-top:12px}
+.td-ln{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4}
+.td-ln>.i{font-size:17px;margin-top:2px;flex:none}
+.td-ln>span{min-width:0;overflow-wrap:anywhere}
+.td-ln+.td-ln{margin-top:9px}
+.td-lnw{padding:12px 0 4px}
+.td-more{display:flex;align-items:center;gap:4px;margin-top:14px;font-size:14px;font-weight:700;color:var(--eb)}
+.td-more .i{font-size:16px}
+
+/* Countdown cells */
+.td-cn{margin-top:14px}
+.td .td-cn>div{background:var(--sheet);padding:10px}
+.td-cn small{font-size:13px}
+.td-cn span{font-size:13px}
+.td-cn span span{display:inline}
+
+/* Gate card */
+.td-gtop{display:flex;gap:12px;align-items:flex-start}
+.td-glbl{font-size:15px;font-weight:600;margin-top:10px}
+.td-gnum{width:fit-content;max-width:100%;font-size:92px;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:clip}
+.td-gnone{font-size:26px;font-weight:800;margin-top:8px}
+.td-seat{flex:none;background:var(--sheet);border-radius:16px;padding:8px 12px;text-align:right;max-width:46%}
+.td-seat small{display:block;font-size:13px;color:var(--mu)}
+.td-seat b{display:block;font-size:17px;font-weight:800;overflow-wrap:anywhere}
+.td-p{margin:10px 0 0;font-size:14px;line-height:1.4}
+.td-p .i{font-size:16px;vertical-align:-3px}
+.td-mu{color:var(--mu)}
+
+/* Rows in line cards */
+.td-line{padding:6px 16px}
+.td-pad{padding:16px}
+.td-row{display:flex;gap:12px;align-items:center;min-height:60px;padding:8px 0;min-width:0}
+.td-row b{display:block;font-size:15px;font-weight:800;line-height:1.25}
+.td-row small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
+.td-row .grow{overflow-wrap:anywhere}
+.td-chev{font-size:18px;color:var(--mu);flex:none}
+.td-warn{color:var(--rot);font-weight:600}
+.td-row small .td-warn{font-weight:700}
+.td-ci{background:var(--cr);border-radius:20px;padding:6px 14px}
+
+/* Mini tiles */
+.td-tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.td-tiles.td-one{grid-template-columns:1fr}
+.td-mini{background:var(--cr);border-radius:20px;padding:12px 14px;min-height:80px;min-width:0}
+.td-mini b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:15px;font-weight:800;line-height:1.25;margin-top:4px}
+.td-mini small{display:block;font-size:13px;color:var(--mu);margin-top:3px;line-height:1.3}
+.td-ring{box-shadow:inset 0 0 0 2px var(--ro)}
+.td-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Banners and callouts */
+.td-bn .grow>span+span{margin-top:3px}
+.td-got{display:inline-flex!important;align-items:center;gap:6px;min-height:44px;margin-top:10px;padding:0 16px;border-radius:22px;
+  background:var(--sheet);color:var(--ink);font-size:14px;font-weight:700;text-decoration:none}
+.td-got .i{font-size:16px;margin:0}
+.td-flag{display:flex;align-items:center;min-height:44px;text-decoration:none}
+.td-flag>.i:last-child{font-size:18px;flex:none}
+.td-stale{display:flex;align-items:center;width:100%;min-height:44px}
+.td .co{font-size:14px}
+
+/* Return legs */
+.td-legs{padding:10px 0 4px}
+.td-leg{display:flex;align-items:center;gap:10px;padding:8px 0;min-width:0}
+.td-leg b{display:block;font-size:15px;font-weight:800}
+.td-leg small{display:block;font-size:13px;color:var(--mu)}
+.td-leg>span{font-size:14px;font-weight:600;text-align:right}
+.td-legs .td-more{margin-top:6px}
+.td-line .td-legs{padding-top:12px}
+.td-flagl{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;font-weight:700;color:var(--rot);text-decoration:none}
+.td-flagl .i{font-size:17px;flex:none}
+
+/* Weather */
+.td-wxnow{display:flex;align-items:center;gap:12px;margin-top:8px}
+.td-temp{font-size:48px;font-weight:300;letter-spacing:-.03em;line-height:1}
+.td-wxnow b{display:block;font-size:15px;font-weight:800}
+.td-wxnow small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.3}
+.td-wxi{font-size:34px;color:var(--eb);flex:none}
+.td-hrs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;margin-top:14px}
+.td-hr{display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 0;border-radius:14px;background:var(--sheet);min-width:0}
+.td-hr small{font-size:13px;color:var(--mu);font-weight:600}
+.td-hr .i{font-size:20px;color:var(--eb)}
+.td-hr b{font-size:15px;font-weight:800}
+.td-hr span{font-size:13px;color:var(--eb);font-weight:600}
+
+/* After the trip */
+.td-sum{min-height:150px}
+.td-sumr{position:relative;display:flex;gap:28px}
+.td-sumr b{display:block;font-size:44px;font-weight:800;line-height:1;letter-spacing:-.02em}
+.td-sumr small{display:block;font-size:14px;color:var(--mu);margin-top:4px;max-width:9em}
+.td-btn{margin-top:16px;width:100%}
+.td-empty .td-p{color:var(--mu)}
+.td-lnci{padding:4px 0 14px}
+.td-lnci .td-ln{color:var(--ink)}
+.td-line.td-legs{padding:10px 16px 12px}
+/* .td-a resets link colour; banners and callouts that are links keep their own. */
+.td-a.bn{color:var(--robt)}
+.td-a.bn.neutral{color:var(--ink)}
+.td-a.co{color:var(--sdt)}
+.td-a.co.rose{color:var(--robt)}
+.td-a.co.plain{color:var(--ink)}
+.td-flag .td-chev{color:inherit}

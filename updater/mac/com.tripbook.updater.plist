@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: install.md replaces __ROOT__ with the repo path and copies this
+     to ~/Library/LaunchAgents. Starts run_mac.sh every 10 minutes; run.py's own
+     window check decides whether anything happens. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.tripbook.updater</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__ROOT__/updater/mac/run_mac.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__ROOT__</string>
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <!-- run_mac.sh writes its own log (updater/state/launchd.log); this only
+       catches failures to start the script at all. -->
+  <key>StandardOutPath</key>
+  <string>__ROOT__/updater/state/launchd.err</string>
+  <key>StandardErrorPath</key>
+  <string>__ROOT__/updater/state/launchd.err</string>
+</dict>
+</plist>

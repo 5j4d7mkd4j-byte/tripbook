@@ -1,0 +1,35 @@
+/* Colour tokens. Light on :root, dark under the system preference unless the
+   viewer forced light, and dark again when the viewer forced dark. */
+:root{
+  color-scheme:light;
+  --page:#FDFDFD;--sheet:#FDFDFD;--band:#779995;--cr:#F2EEE1;--sd:#EDDBC6;--sdt:#16191A;
+  --ro:#C4686B;--rog:#FDFDFD;--rot:#A4474B;--ink:#16191A;--mu:#5F6764;
+  --gh:rgba(22,25,26,.28);--ln:rgba(22,25,26,.10);--ok:#2F7D5B;--tile:#FDFDFD;
+  --nav:#FDFDFD;--navb:rgba(22,25,26,.06);--navs:0 10px 30px rgba(22,25,26,.12);--navi:#5F6764;
+  --pill:#4A706D;--pillt:#FDFDFD;--eb:#4A706D;--ob:#FDFDFD;--obt:#16191A;--ht:rgba(22,25,26,.13);
+  --s1:#E4D3BC;--s2:#CDB89C;--s3:#A9916F;--s4:#7E6A50;
+  --rob:#C4686B;--robt:#16191A;--onband:rgba(253,253,253,.24);--onband2:rgba(253,253,253,.2);
+  --scrim:rgba(22,25,26,.0);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --page:#121514;--sheet:#1A1E1D;--band:#2E4A47;--cr:#25241F;--sd:#3A3127;--sdt:#F3E2CC;
+    --ro:#E3979A;--rog:#16191A;--rot:#E3979A;--ink:#EEEBE2;--mu:#A4ACA9;
+    --gh:rgba(238,235,226,.20);--ln:rgba(255,255,255,.08);--ok:#63C496;--tile:#2B2E2A;
+    --nav:#222826;--navb:rgba(255,255,255,.06);--navs:0 10px 30px rgba(0,0,0,.4);--navi:#A9B2AF;
+    --pill:#9CC0BC;--pillt:#121514;--eb:#9CC0BC;--ob:#EEEBE2;--obt:#EEEBE2;--ht:rgba(238,235,226,.16);
+    --s1:#4A4134;--s2:#6B5D49;--s3:#8E7B60;--s4:#B49F80;
+    --rob:#E3979A;--robt:#16191A;--onband:rgba(253,253,253,.14);--onband2:rgba(253,253,253,.12);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#121514;--sheet:#1A1E1D;--band:#2E4A47;--cr:#25241F;--sd:#3A3127;--sdt:#F3E2CC;
+  --ro:#E3979A;--rog:#16191A;--rot:#E3979A;--ink:#EEEBE2;--mu:#A4ACA9;
+  --gh:rgba(238,235,226,.20);--ln:rgba(255,255,255,.08);--ok:#63C496;--tile:#2B2E2A;
+  --nav:#222826;--navb:rgba(255,255,255,.06);--navs:0 10px 30px rgba(0,0,0,.4);--navi:#A9B2AF;
+  --pill:#9CC0BC;--pillt:#121514;--eb:#9CC0BC;--ob:#EEEBE2;--obt:#EEEBE2;--ht:rgba(238,235,226,.16);
+  --s1:#4A4134;--s2:#6B5D49;--s3:#8E7B60;--s4:#B49F80;
+  --rob:#E3979A;--robt:#16191A;--onband:rgba(253,253,253,.14);--onband2:rgba(253,253,253,.12);
+}

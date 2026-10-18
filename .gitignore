@@ -19,3 +19,12 @@ app/test/
 app/CONTRACT.md
 updater/sample_status.json
 updater/test_*.py
+# Python bytecode from running the updater locally.
+__pycache__/
+
+# Airport walking-navigation data and raw OpenStreetMap pulls (sealed into guide.bin).
+guide/nav/
+guide/osm/
+
+# Researched menu prices and visit style per place (merged into food.json, sealed).
+food/prices/

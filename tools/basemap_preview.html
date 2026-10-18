@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Basemap preview</title>
+<!-- Dev preview of data/basemap.json (the app's own street map).
+     Not part of the app: tools/basemap_shot.mjs serves it at /basemap_preview.html
+     next to app/src/static, so it uses the vendored Leaflet and works offline.
+     Views: ?v=midtown | les | bk | wburg | qns | stg | all, or ?lat=40.75&lon=-73.99&z=15.
+     &labels=0 hides names. &tiles=1 lays OpenStreetMap tiles over it at half
+     opacity to check alignment (needs network; a handful of tiles per run).
+     Sets window.__ready when drawn. -->
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+  :root {
+    --water: #cfe0ea;
+    --land: #f5f2ec;
+    --park: #d4e8c9;
+    --road: #ffffff;
+    --road-case: #e1dbcf;
+    --major: #fff6dc;
+    --major-case: #d8ccb2;
+    --label: #4f4d48;
+    --halo: #ffffff;
+  }
+  html, body { margin: 0; height: 100%; background: var(--water); }
+  #map { position: fixed; inset: 0; background: var(--water); }
+  .lbl { background: none; border: 0; }
+  .lbl span {
+    display: block; transform: translate(-50%, -50%); white-space: nowrap;
+    font: 600 11px/1.1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    color: var(--label); letter-spacing: .01em;
+    text-shadow: 0 0 2px var(--halo), 0 0 2px var(--halo), 0 0 3px var(--halo);
+  }
+  .lbl.park span { color: #3f6b35; font-weight: 500; font-style: italic; }
+  #err { position: fixed; left: 12px; right: 12px; top: 12px; z-index: 1000; padding: 10px 12px;
+         background: #fff; color: #a1261b; font: 13px/1.3 -apple-system, sans-serif; border-radius: 8px; display: none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="err"></div>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  const VIEWS = {
+    midtown: [40.7549, -73.9840, 15],  // Bryant Park / Times Sq
+    les: [40.7180, -73.9880, 15],      // Lower East Side
+    bk: [40.6950, -73.9900, 14],       // Brooklyn Heights / Downtown BK
+    wburg: [40.7170, -73.9560, 15],    // Williamsburg
+    qns: [40.7560, -73.9300, 14],      // LIC / Astoria
+    stg: [40.6420, -74.0770, 15],      // St George, Staten Island Ferry
+    all: [40.7350, -73.9700, 12],
+  };
+  const v = VIEWS[q.get('v')] || VIEWS.midtown;
+  const lat = +q.get('lat') || v[0], lon = +q.get('lon') || v[1], z = +q.get('z') || v[2];
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const fail = msg => { const e = document.getElementById('err'); e.textContent = msg; e.style.display = 'block'; window.__ready = 'error'; };
+  if (!window.L) return fail('Leaflet did not load (vendor/leaflet missing?)');
+
+  // Canvas keeps ~10k vertices cheap on a phone; one renderer for all layers.
+  const map = L.map('map', {center: [lat, lon], zoom: z, minZoom: 11, maxZoom: 18, preferCanvas: true, zoomControl: false});
+  // Top-left: at phone width the attribution wraps over the bottom-left corner.
+  L.control.scale({imperial: true, metric: false, position: 'topleft'}).addTo(map);
+
+  // Line widths grow with zoom: base px at z15, doubling per level.
+  const w = (base, zz = map.getZoom()) => Math.max(0.4, Math.min(base * Math.pow(2, zz - 15), base * 3));
+
+  // Same URL as the app (contract: fetch 'data/basemap.json').
+  fetch('data/basemap.json').then(r => {
+    if (!r.ok) throw new Error('basemap.json HTTP ' + r.status);
+    return r.json();
+  }).then(fc => {
+    const [W, S, E, N] = fc.bbox;
+    map.setMaxBounds([[S - 0.02, W - 0.02], [N + 0.02, E + 0.02]]);
+    map.attributionControl.addAttribution(fc.attribution);
+    const of = k => ({type: 'FeatureCollection', features: fc.features.filter(f => f.properties.k === k)});
+
+    // Land: stroke in the fill colour hides hairline seams between borough/municipality polygons.
+    L.geoJSON(of('land'), {interactive: false, style: {stroke: true, color: css('--land'), weight: 1, fillColor: css('--land'), fillOpacity: 1}}).addTo(map);
+    L.geoJSON(of('park'), {interactive: false, style: {stroke: false, fillColor: css('--park'), fillOpacity: 1}}).addTo(map);
+
+    // Roads and majors: a casing pass under a fill pass.
+    const line = (k, color, base) => L.geoJSON(of(k), {interactive: false, style: () => ({color, weight: w(base), lineCap: 'round', lineJoin: 'round', opacity: 1})});
+    const layers = [
+      [line('road', css('--road-case'), 3.2), 3.2],
+      [line('major', css('--major-case'), 6.5), 6.5],
+      [line('road', css('--road'), 2.2), 2.2],
+      [line('major', css('--major'), 5), 5],
+    ];
+    layers.forEach(([l]) => l.addTo(map));
+    map.on('zoomend', () => layers.forEach(([l, base]) => l.setStyle({weight: w(base)})));
+
+    // Alignment check against OpenStreetMap at half opacity. (Not Carto: its
+    // keyless URLs now return only "API KEY REQUIRED" tiles.)
+    // Own pane above the vector layers (tilePane sits below them, under opaque land).
+    if (q.get('tiles') === '1') {
+      map.createPane('check').style.zIndex = 450;
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {pane: 'check', maxZoom: 19, opacity: 0.5, attribution: '© OpenStreetMap contributors'}).addTo(map);
+    }
+    if (q.get('labels') !== '0') labels(fc);
+    setTimeout(() => { window.__ready = true; }, 300);
+  }).catch(e => fail(String(e.message || e)));
+
+  // Labels: parks get one at their largest ring's centroid; each named major
+  // road gets one at the free spot on its line nearest the view centre, kept
+  // off line ends and other majors so avenue labels don't pile up where they
+  // meet a cross street. Overlapping labels are skipped.
+  function labels(fc) {
+    const layer = L.layerGroup().addTo(map);
+    const majors = fc.features.filter(f => f.properties.k === 'major' && f.properties.n);
+    const parks = fc.features.filter(f => f.properties.k === 'park' && f.properties.n);
+    const parts = g => g.type === 'LineString' ? [g.coordinates] : g.coordinates;
+    const outer = g => g.type === 'Polygon' ? [g.coordinates[0]] : g.coordinates.map(p => p[0]);
+    const area = r => r.reduce((a, p, i) => { const n = r[(i + 1) % r.length]; return a + p[0] * n[1] - n[0] * p[1]; }, 0) / 2;
+    const STEP = 18, END_GAP = 36, CROSS_GAP = 22;  // screen px
+
+    function draw() {
+      layer.clearLayers();
+      const z = map.getZoom(), b = map.getBounds().pad(-0.08), c = map.latLngToLayerPoint(map.getCenter());
+      const size = map.getSize();
+      // Labels are centred on their point; ~6.6 px per character at 11px/600.
+      const fits = (p, text) => {
+        const x = map.layerPointToContainerPoint(p).x, half = text.length * 3.3 + 4;
+        return x - half >= 4 && x + half <= size.x - 4;
+      };
+      const placed = [];
+      const free = p => placed.every(o => Math.abs(o.x - p.x) > 70 || Math.abs(o.y - p.y) > 16);
+      const put = (p, text, cls) => {
+        placed.push(p);
+        L.marker(map.layerPointToLatLng(p), {interactive: false, keyboard: false, icon: L.divIcon({className: 'lbl ' + cls, html: '<span></span>', iconSize: [0, 0]})})
+          .addTo(layer).getElement().firstChild.textContent = text;
+      };
+      if (z >= 13) for (const f of parks) {
+        // Bigger parks label earlier.
+        const r = outer(f.geometry).sort((a, b2) => Math.abs(area(b2)) - Math.abs(area(a)))[0];
+        const sz = Math.abs(area(r)) * 1e6;  // ~ (0.001 deg)^2 units
+        if (sz < (z >= 16 ? 0.15 : z >= 15 ? 0.5 : z >= 14 ? 3 : 20)) continue;
+        const ll = L.latLng(r.reduce((s, p) => [s[0] + p[1] / r.length, s[1] + p[0] / r.length], [0, 0]));
+        const p = map.latLngToLayerPoint(ll);
+        if (b.contains(ll) && free(p) && fits(p, f.properties.n)) put(p, f.properties.n, 'park');
+      }
+      if (z < 14) return;
+
+      // Visible major lines in screen space, with candidate spots every STEP px.
+      const lines = majors.map(f => ({f, segs: [], cands: []}));
+      for (const m of lines) for (const line of parts(m.f.geometry)) {
+        const pts = line.map(q => map.latLngToLayerPoint([q[1], q[0]]));
+        const total = pts.slice(1).reduce((s, p, i) => s + p.distanceTo(pts[i]), 0);
+        let run = 0;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i], e = pts[i + 1], len = a.distanceTo(e);
+          m.segs.push([a, e]);
+          for (let t = (STEP - run % STEP) % STEP; t < len; t += STEP) {
+            const along = run + t, p = a.add(e.subtract(a).multiplyBy(t / len));
+            if (along > END_GAP && total - along > END_GAP && b.contains(map.layerPointToLatLng(p)) && fits(p, m.f.properties.n)) m.cands.push(p);
+          }
+          run += len;
+        }
+      }
+      const distSeg = (p, [a, e]) => {
+        const d = e.subtract(a), l2 = d.x * d.x + d.y * d.y;
+        const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * d.x + (p.y - a.y) * d.y) / l2)) : 0;
+        return p.distanceTo(a.add(d.multiplyBy(t)));
+      };
+      const clear = (p, self) => lines.every(o => o === self || o.segs.every(s => distSeg(p, s) > CROSS_GAP));
+      // Lines nearest the centre choose first.
+      for (const m of lines) {
+        m.cands.sort((p, q) => p.distanceTo(c) - q.distanceTo(c));
+        m.best = m.cands.length ? m.cands[0].distanceTo(c) : Infinity;
+      }
+      for (const m of lines.filter(m => m.cands.length).sort((x, y) => x.best - y.best)) {
+        const p = m.cands.find(p => free(p) && clear(p, m)) || m.cands.find(free);
+        if (p) put(p, m.f.properties.n, 'road');
+      }
+    }
+    map.on('moveend zoomend', draw);
+    draw();
+  }
+})();
+</script>
+</body>
+</html>

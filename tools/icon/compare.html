@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1600">
+<title>nyc. icon compare</title>
+<!-- Comparison sheet for the icon variants. Reads out/<v>-1024.png; render.sh screenshots it to out/compare.png.
+     The installed variant comes from out/pick.js (written by install.sh), or ?pick=<v>. -->
+<script src="out/pick.js"></script>
+<style>
+@font-face{font-family:Figtree;src:url(../../app/src/static/fonts/figtree.woff2) format("woff2");font-weight:800;font-display:block}
+@font-face{font-family:Inter;src:url(../../app/src/static/fonts/inter.woff2) format("woff2");font-weight:300 900;font-display:block}
+:root{--ink:#16191A;--mu:#5F6764;--ln:rgba(22,25,26,.10)}
+*{box-sizing:border-box}
+html,body{margin:0;background:#F4F4F2;color:var(--ink);font-family:Inter,system-ui,sans-serif}
+body{width:1600px;padding:40px 40px 44px}
+h1{margin:0 0 4px;font:800 30px/1.1 Figtree,Inter,sans-serif;letter-spacing:-.02em}
+.sub{margin:0 0 30px;font-size:15px;color:var(--mu)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
+.col{display:flex;flex-direction:column;align-items:center;gap:18px}
+.lab{align-self:stretch;display:flex;align-items:baseline;gap:10px;padding:0 10px}
+.lab b{font:800 30px/1 Figtree,Inter,sans-serif}
+.lab span{font-size:16px;font-weight:600;color:var(--mu)}
+.lab .pick{margin-left:auto;align-self:center;padding:5px 11px 6px;border-radius:999px;background:#2E4A47;color:#F2EEE1;
+  font:800 14px/1 Figtree,Inter,sans-serif;font-style:normal;letter-spacing:.01em}
+.col.is-pick .lab span{color:var(--ink)}
+.col.is-pick .big{outline:3px solid #2E4A47;outline-offset:8px}
+.big{width:300px;height:300px;border-radius:22.5%;display:block;
+  box-shadow:0 1px 2px rgba(0,0,0,.08),0 12px 32px rgba(0,0,0,.14)}
+.wall{width:354px;border-radius:26px;padding:22px 18px 16px;display:flex;flex-direction:column;gap:18px}
+.light{background:radial-gradient(120% 90% at 20% 0%,#EBC9B4 0%,rgba(235,201,180,0) 60%),linear-gradient(165deg,#B7CADB 0%,#A3B8CC 55%,#CDB3A8 100%)}
+.dark{background:radial-gradient(120% 90% at 80% 0%,#2B2340 0%,rgba(43,35,64,0) 60%),linear-gradient(165deg,#161C29 0%,#0C0F16 60%,#1B1520 100%)}
+.row{display:flex;justify-content:space-between;align-items:flex-start}
+.row.r76{justify-content:space-around}
+.app{display:flex;flex-direction:column;align-items:center;gap:5px}
+.app i{display:block;position:relative;overflow:hidden}
+.r60 .app i{width:60px;height:60px;border-radius:13.5px}
+.r76 .app i{width:76px;height:76px;border-radius:17.1px}
+.app img{width:100%;height:100%;display:block}
+.app em{font-style:normal;font-size:11.5px;font-weight:500;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);letter-spacing:.01em}
+/* Neutral placeholder apps: grey tiles with a simple white or dark mark. */
+.p1{background:linear-gradient(#F2F3F5,#DADDE1)}
+.p2{background:linear-gradient(#A2A8AF,#80878F)}
+.p3{background:linear-gradient(#4A4E55,#2F3238)}
+.p4{background:linear-gradient(#C9CDD2,#AEB3B9)}
+.app i.ph::after{content:"";position:absolute;left:30%;top:30%;width:40%;height:40%;border-radius:28%;background:rgba(255,255,255,.9)}
+.app i.p1::after{background:rgba(22,25,26,.35);border-radius:50%}
+.app i.p3::after{border-radius:50%;background:rgba(255,255,255,.75);left:32%;top:32%;width:36%;height:36%}
+.note{margin-top:26px;font-size:13px;color:var(--mu)}
+</style>
+</head>
+<body>
+<h1>nyc. home-screen icon</h1>
+<p class="sub">Four variants. Large preview with iOS corner rounding, then at real home-screen size (60px iPhone, 76px iPad) on a light and a dark wallpaper. <span id="picknote"></span></p>
+<div class="grid" id="grid"></div>
+<p class="note">Source: tools/icon/icon.html?v=A|B|C|D, rendered by tools/icon/render.sh to tools/icon/out/&lt;v&gt;-1024.png. tools/icon/install.sh &lt;v&gt; puts a variant in the app.</p>
+<script>
+const NAMES = {
+  A: 'Teal field, peach period',
+  B: 'Deep teal, cream wordmark',
+  C: 'Cream field, teal wordmark',
+  D: 'Night, you-are-here dot',
+};
+// The variant installed in the app (tools/icon/install.sh <v>). Shown with a "Pick" badge.
+const PICK = new URLSearchParams(location.search).get('pick') || window.NYC_ICON_PICK || 'B';
+document.getElementById('picknote').textContent = PICK + ' is the one installed in the app.';
+const ph = (c, n) => `<div class="app"><i class="ph ${c}"></i><em>${n}</em></div>`;
+const me = v => `<div class="app"><i><img src="out/${v}-1024.png" alt=""></i><em>nyc.</em></div>`;
+const wall = (v, cls) => `
+  <div class="wall ${cls}">
+    <div class="row r60">${ph('p1', 'Notes')}${ph('p2', 'Clock')}${me(v)}${ph('p3', 'Camera')}</div>
+    <div class="row r76">${ph('p4', 'Files')}${me(v)}${ph('p2', 'Clock')}</div>
+  </div>`;
+document.getElementById('grid').innerHTML = Object.keys(NAMES).map(v => `
+  <div class="col${v === PICK ? ' is-pick' : ''}">
+    <div class="lab"><b>${v}</b><span>${NAMES[v]}</span>${v === PICK ? '<em class="pick">Pick</em>' : ''}</div>
+    <img class="big" src="out/${v}-1024.png" alt="">
+    ${wall(v, 'light')}
+    ${wall(v, 'dark')}
+  </div>`).join('');
+</script>
+</body>
+</html>
