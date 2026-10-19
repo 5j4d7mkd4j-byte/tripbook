@@ -10,6 +10,7 @@
   --s1:#E4D3BC;--s2:#CDB89C;--s3:#A9916F;--s4:#7E6A50;
   --rob:#C4686B;--robt:#16191A;--onband:rgba(253,253,253,.24);--onband2:rgba(253,253,253,.2);
   --scrim:rgba(22,25,26,.0);
+  --warn:#B7791F;--obm:rgba(22,25,26,.86);
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -21,6 +22,7 @@
     --pill:#9CC0BC;--pillt:#121514;--eb:#9CC0BC;--ob:#EEEBE2;--obt:#EEEBE2;--ht:rgba(238,235,226,.16);
     --s1:#4A4134;--s2:#6B5D49;--s3:#8E7B60;--s4:#B49F80;
     --rob:#E3979A;--robt:#16191A;--onband:rgba(253,253,253,.14);--onband2:rgba(253,253,253,.12);
+    --warn:#E0B25C;--obm:rgba(238,235,226,.74);
   }
 }
 :root[data-theme="dark"]{
@@ -32,4 +34,24 @@
   --pill:#9CC0BC;--pillt:#121514;--eb:#9CC0BC;--ob:#EEEBE2;--obt:#EEEBE2;--ht:rgba(238,235,226,.16);
   --s1:#4A4134;--s2:#6B5D49;--s3:#8E7B60;--s4:#B49F80;
   --rob:#E3979A;--robt:#16191A;--onband:rgba(253,253,253,.14);--onband2:rgba(253,253,253,.12);
+  --warn:#E0B25C;--obm:rgba(238,235,226,.74);
+}
+
+/* Colour rules: rose (--ro/--rot) only means at risk, late, cancelled, closed or
+   destructive. Positive, open and "now" use --eb; caution and "opens later" use
+   --warn; selected or recommended uses ink or band. On the band, primary text is
+   --ob, secondary --obm, tertiary --obt; no white text under 18px on the band. */
+
+/* Spacing, type, radius and icon scales. Snap to these in any selector you
+   touch; there is no sweeping migration. */
+:root{
+  --sp-1:4px;--sp-1h:6px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-7:32px;--sp-8:40px;--sp-9:48px;
+  --gutter:20px;
+  /* font shorthands: font:var(--t-body) */
+  --t-cap:800 12px/1.3 Inter,system-ui,sans-serif;--t-meta:600 13px/1.35 Inter,system-ui,sans-serif;--t-body:400 15px/1.45 Inter,system-ui,sans-serif;
+  --t-row:800 17px/1.25 Inter,system-ui,sans-serif;--t-sec:800 22px/1.2 Inter,system-ui,sans-serif;--t-hl:300 32px/1.1 Inter,system-ui,sans-serif;
+  --d1:96px;--d2:64px;--d3:44px;
+  --r-sm:12px;--r-md:16px;--r-lg:24px;--r-sheet:28px;--r-pill:999px;
+  --i-sm:16px;--i-md:20px;--i-lg:24px;
+  --ease:cubic-bezier(.32,.72,0,1);--press:.12s;
 }

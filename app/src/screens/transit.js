@@ -6,9 +6,11 @@
      #hotel               the hotel, directions, its confirmation (masked) and
                           the nearest places from the food list on a map
    The hotel comes from the trip, or from Wallet when the trip has none. Wallet
-   values stay on the phone: the only one ever put in a link is the address the
-   traveller typed, as the destination of a maps or ride link. Location is kept
-   in memory by N.where and only read here. */
+   values never leave the phone (CONTRACT: no fetch, no URL, no logs), so a
+   hotel typed into Wallet is never put in a maps or ride link, not even as
+   coordinates worked out from its address: those links open the app with no
+   destination and the page offers the address to copy and paste instead.
+   Location is kept in memory by N.where and only read here. */
 (() => {
 'use strict';
 const {h, icon} = N;
@@ -16,14 +18,17 @@ const {h, icon} = N;
 // ---------- defensive readers (any field can be missing) ----------
 const arr = v => Array.isArray(v) ? v.filter(x => x != null && x !== '') : [];
 const str = v => typeof v === 'string' ? v.trim() : (typeof v === 'number' ? String(v) : '');
+const txt = v => typeof v === 'string' ? v.trim() : '';
 const num = v => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
 const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : null;
 const hasLL = o => !!o && num(o.lat) != null && num(o.lon) != null;
 const web = u => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(u.trim())) ? u.trim() : null;
 const T = v => { if (v == null || v === '') return null; const t = new Date(v).getTime(); return Number.isFinite(t) ? t : null; };
-const nowMs = () => N.now().getTime();
+// N.bestRoute(dir, now) can ask about another moment: nowAt stands in for the clock meanwhile.
+let nowAt = null;
+const nowMs = () => nowAt != null ? nowAt : N.now().getTime();
 const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-const andJoin = a => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+const andJoin = (a, w = 'and') => a.length < 2 ? (a[0] || '') : a.slice(0, -1).join(', ') + ` ${w} ` + a[a.length - 1];
 const enc = encodeURIComponent;
 // One section failing must never take the whole page down.
 const safe = (fn, where, fb = '') => { try { return fn(); } catch (e) { N.report(e, 'transit ' + where); return fb; } };
@@ -108,36 +113,67 @@ function geocode(address) {
 // ---------- the hotel ----------
 // {name, address, phone, ll:{lat, lon, exact}, local, checkin, checkout} or null
 function hotelInfo() {
-  const ho = obj(safe(() => N.hotel(), 'hotel', null));
+  // A trip hotel with no text name, address or pin is junk; it must not hide a Wallet hotel.
+  const usable = v => { const o = obj(v); return o && (txt(o.name) || txt(o.address) || hasLL(o)) ? o : null; };
+  let ho = usable(safe(() => N.hotel(), 'hotel', null));
+  const w = obj(safe(() => N.wallet(), 'wallet', null)) || {};
+  // N.hotel() needs an address; a Wallet hotel saved with only a name (and
+  // perhaps its confirmation) still belongs on #hotel.
+  if (!ho) {
+    if (txt(w.hotel_address)) ho = {name: txt(w.hotel_name) || 'Hotel', address: txt(w.hotel_address), local: true};
+    else if (txt(w.hotel_name)) ho = {name: txt(w.hotel_name), address: '', local: true};
+  } else if (!ho.local && !txt(ho.address) && !hasLL(ho) && txt(w.hotel_address)) {
+    // The trip names the hotel but has no address, and the page asks for one in
+    // Wallet: once typed, it has to count (it stays private like any Wallet hotel).
+    const same = !txt(w.hotel_name) || txt(w.hotel_name).toLowerCase() === txt(ho.name).toLowerCase();
+    ho = {name: txt(w.hotel_name) || txt(ho.name), address: txt(w.hotel_address), local: true,
+      phone: same ? ho.phone : '', checkin: ho.checkin || ho.check_in, checkout: ho.checkout || ho.check_out};
+  }
   if (!ho) return null;
-  const address = str(ho.address);
+  const address = txt(ho.address);
   let ll = hasLL(ho) ? {lat: ho.lat, lon: ho.lon, exact: true} : null;
   if (!ll && address) { const g = geocode(address); if (g) ll = Object.assign(g, {exact: false}); }
-  return {name: str(ho.name) || 'Hotel', address, phone: str(ho.phone), ll, local: !!ho.local,
+  return {name: txt(ho.name) || 'Hotel', address, phone: str(ho.phone), ll, local: !!ho.local,
     checkin: str(ho.checkin || ho.check_in), checkout: str(ho.checkout || ho.check_out)};
 }
 const hotelSig = ho => ho ? [ho.name, ho.address, ho.ll ? ho.ll.lat.toFixed(5) + ',' + ho.ll.lon.toFixed(5) : ''].join('|') : '';
 
 // ---------- links ----------
-// Destination for maps and rides: the address the traveller typed, or a place
-// name for LGA and Midtown. Nothing else goes into these URLs.
-const destFor = (dir, ho) => dir === 'lga' ? LGA_ADDR : ho && ho.address ? ho.address : ho && ho.ll && ho.ll.exact ? {lat: ho.ll.lat, lon: ho.ll.lon} : MIDTOWN_ADDR;
+// Destination for maps and rides: LGA, the trip's own hotel, or Midtown when
+// there is no hotel address. A Wallet hotel gives null: its address is private
+// (CONTRACT: wallet values never go into a URL), so the app opens with no
+// destination and the traveller pastes the address.
+function destFor(dir, ho) {
+  if (dir === 'lga') return LGA_ADDR;
+  if (!ho) return MIDTOWN_ADDR;
+  if (ho.local) return ho.address ? null : MIDTOWN_ADDR;
+  if (ho.address) return ho.address;
+  return ho.ll && ho.ll.exact ? {lat: ho.ll.lat, lon: ho.ll.lon} : MIDTOWN_ADDR;
+}
+const privateDest = (dir, ho) => dir === 'hotel' && !!ho && ho.local && !!ho.address;
 const destText = d => typeof d === 'string' ? d : `${d.lat},${d.lon}`;
-const appleUrl = (d, mode) => N.mapsUrl(d, mode);
-const googleUrl = (d, mode) => `https://www.google.com/maps/dir/?api=1&destination=${enc(destText(d))}&travelmode=${mode === 'd' ? 'driving' : mode === 'w' ? 'walking' : 'transit'}`;
+const gMode = mode => mode === 'd' ? 'driving' : mode === 'w' ? 'walking' : 'transit';
+// Google's directions link with no destination opens an empty "to" box.
+const googleUrl = (d, mode) => `https://www.google.com/maps/dir/?api=1${d ? `&destination=${enc(destText(d))}` : ''}&travelmode=${gMode(mode)}`;
+const appleUrl = (d, mode) => d ? N.mapsUrl(d, mode)
+  : /iPhone|iPad|Macintosh/.test(navigator.userAgent) ? `https://maps.apple.com/?dirflg=${mode}` : googleUrl(null, mode);
 function uberUrl(dir, ho) {
   let u = 'https://m.uber.com/ul/?action=setPickup&pickup=my_location';
+  const d = destFor(dir, ho);
   if (dir === 'lga') u += `&dropoff[latitude]=${LGA.lat}&dropoff[longitude]=${LGA.lon}&dropoff[formatted_address]=${enc(LGA_ADDR)}`;
-  else if (ho && ho.address) u += `&dropoff[formatted_address]=${enc(ho.address)}`;
-  else if (ho && ho.ll && ho.ll.exact) u += `&dropoff[latitude]=${ho.ll.lat}&dropoff[longitude]=${ho.ll.lon}`;
+  else if (d && typeof d === 'object') u += `&dropoff[latitude]=${d.lat}&dropoff[longitude]=${d.lon}`;
+  else if (d) u += `&dropoff[formatted_address]=${enc(d)}`;
   return u;
 }
-// Lyft only takes coordinates, so a typed Wallet address is not turned into one.
+// Lyft only takes coordinates: LGA, or the trip hotel's own pin.
 function lyftUrl(dir, ho) {
   if (dir === 'lga') return `https://lyft.com/ride?id=lyft&destination[latitude]=${LGA.lat}&destination[longitude]=${LGA.lon}`;
-  if (ho && ho.ll && ho.ll.exact) return `https://lyft.com/ride?id=lyft&destination[latitude]=${ho.ll.lat}&destination[longitude]=${ho.ll.lon}`;
+  if (ho && !ho.local && ho.ll && ho.ll.exact) return `https://lyft.com/ride?id=lyft&destination[latitude]=${ho.ll.lat}&destination[longitude]=${ho.ll.lon}`;
   return 'https://lyft.com/ride?id=lyft';
 }
+// The address as a copy row, for links that can't carry it.
+const copyRow = ho => h`<button class="tr-lk tr-lkc tr-copy" data-act="copy" data-copy="${ho.address}">${icon('copy')}<span class="grow">Copy the hotel address<small class="ell">${ho.address}</small></span></button>`;
+const PRIVATE_NOTE = 'Wallet details never go into a link, so these open without a destination: copy the address first, then paste it in.';
 const ext = (url, label, cls = '') => h`<a class="chip ${cls} tr-chip" href="${url}" target="_blank" rel="noopener">${label}${icon('arrow-up-right')}</a>`;
 
 // ---------- guide data ----------
@@ -155,8 +191,20 @@ const MODE = {
 };
 const modeOf = r => MODE[str(r && r.mode)] || {icon: 'route', kind: 'other'};
 const routeIcon = r => /\bvan\b/i.test(str(r.id).replace(/[-_]/g, ' ')) || /^shared van/i.test(str(r.name)) ? 'users' : modeOf(r).icon;
+// The guide marks some figures "(inferred)"; the "~" already says it is approximate.
+// A bare number is dollars ("5" alone reads as nothing).
+const costOf = r => { const c = r && r.cost; return num(c) != null ? `$${c}` : txt(c).replace(/\s*\((?:inferred|estimated?)\)/gi, '').trim(); };
+// The price and what comes on top, so the price keeps to one line:
+// "~$44–66 + tolls and tip" gives ['~$44–66', 'plus tolls & tip'], "App fare + $1.50 …" ['App fare', 'plus $1.50 …'].
+function costParts(r) {
+  const c = costOf(r);
+  const m = /^(~?\$[\d.,]+(?:\s*[–-]\s*\$?[\d.,]+)?)\s*(.*)$/.exec(c) || /^(.+?)\s+(\+.+)$/.exec(c);
+  if (!m || !m[2]) return [c, ''];
+  return [m[1], m[2].replace(/^\+\s*/, 'plus ').replace(/\band\b/g, '&')];
+}
 const rangeOf = m => {
-  const a = arr(m).map(Number).filter(Number.isFinite);
+  // [45, 75], a single number, or numeric strings; zero or less is junk.
+  const a = (Array.isArray(m) ? m : [m]).map(v => typeof v === 'string' && v.trim() ? Number(v) : v).filter(v => num(v) != null && v > 0).map(Math.round);
   if (!a.length) return null;
   return a.length > 1 && a[1] !== a[0] ? `${a[0]}–${a[1]}` : `${a[0]}`;
 };
@@ -164,8 +212,14 @@ const rangeOf = m => {
 const groundOf = () => arr((N.guideFor('LGA') || {}).ground).filter(g => obj(g) && str(g.id));
 const groundAsRoute = g => ({id: g.id, mode: g.mode, name: str(g.name) || 'Ground transport', summary: g.where ? `From the ${str(g.where)}.` : '',
   min: g.min, cost: g.cost, best_when: g.good, avoid_when: g.bad,
-  steps: arr(g.steps).map(s => typeof s === 'string' ? {icon: MODE[g.mode] ? MODE[g.mode].icon : 'point', text: s} : s),
+  steps: arr(g.steps).map(s => typeof s === 'string' ? {icon: groundStepIcon(s, g.mode), text: s} : s),
   traffic_key: g.mode === 'taxi' || g.mode === 'rideshare' ? 'to_hotel' : null});
+// A plain-text step gets its own icon when it names a train ("E (or F…", "LIRR …"), not the route's.
+function groundStepIcon(t, mode) {
+  if (/\b(subway|train|lirr)\b/i.test(t) || /^[ACEBDFMGJZLNQRW1-7](?= \(| or |\/)/.test(t)) return 'train';
+  if (/\b(q70|m60|bus)\b/i.test(t)) return 'bus';
+  return MODE[mode] ? MODE[mode].icon : 'point';
+}
 // The airport-guide entry that describes where a to-hotel route starts.
 function groundFor(r) {
   const g = groundOf(); const id = str(r.id), m = str(r.mode);
@@ -190,27 +244,31 @@ function findRoute(param) {
 // ---------- subway and bus route names ----------
 const LINE = {A: 'ace', C: 'ace', E: 'ace', B: 'bdfm', D: 'bdfm', F: 'bdfm', M: 'bdfm', G: 'g', J: 'jz', Z: 'jz', L: 'l',
   N: 'nqrw', Q: 'nqrw', R: 'nqrw', W: 'nqrw', 1: '123', 2: '123', 3: '123', 4: '456', 5: '456', 6: '456', 7: '7', S: 's'};
-// Line bullets are drawn in theme colours: there are no MTA colour tokens yet
-// (asked for in core_requests), and colours may only come from tokens.
-const bullet = l => LINE[l] ? h`<span class="tr-mta" aria-label="${l + ' train'}">${l}</span>` : '';
-const linesIn = r => {
-  if (str(r.mode) !== 'subway') return [];
+// MTA-coloured bullets from N.route (_route.js); plain theme circles if it isn't there.
+const bullet = l => !LINE[l] ? ''
+  : typeof (N.route && N.route.badge) === 'function' ? N.route.badge(l, 'tr-b')
+  : h`<span class="tr-mta" role="img" aria-label="${l + ' train'}">${l}</span>`;
+// The lines you ride on route r, in order: subway letters (on a subway route), Q70, M60 and
+// LIRR. "E (or F, M, R, 7)" gives the E alone: the others in brackets are fallbacks.
+const pathTags = r => {
+  if (modeOf(r).kind !== 'transit') return [];
   // Drop "Terminal B", "Level 2", "Gate C3", "74 St" so their letters and numbers aren't read as lines.
-  const s = `${str(r.name)} ${str(r.summary)}`
+  const s = `${str(r.name)} ${str(r.summary)}`.replace(/\([^)]*\)/g, ' ')
     .replace(/\b(terminals?|level|gates?|concourse|doors?|exit)\s+(?:[A-Z]\d{0,2}|\d{1,2})(?:\s*(?:and|or|&)\s*(?:[A-Z]\d{0,2}|\d{1,2}))*\b/gi, ' ')
     .replace(/\b\d+\s*(st|nd|rd|th|av|ave)\b/gi, ' ');
-  return [...new Set((s.match(/\b[ACEBDFMGJZLNQRWS1-7]\b/g) || []))].filter(l => LINE[l]);
+  const sub = str(r.mode) === 'subway';
+  return [...new Set(s.match(/\b(?:Q70|M60|LIRR|[ACEBDFMGJZLNQRWS1-7])\b/g) || [])].filter(t => !LINE[t] || sub);
 };
-// Tokens an MTA alert can mention for this route: subway letters, Q70, M60, LIRR.
-const tokensOf = r => {
-  if (modeOf(r).kind !== 'transit') return [];
-  const s = `${str(r.name)} ${str(r.summary)}`.toUpperCase();
-  const t = new Set(linesIn(r));
-  (s.match(/\b(Q70|M60|LIRR)\b/g) || []).forEach(x => t.add(x));
-  return [...t];
-};
-const alertKey = a => str(a && a.route).toUpperCase().replace(/[-\s]?SBS$/, '').replace(/\s+TRAIN$/, '');
+const linesIn = r => pathTags(r).filter(l => LINE[l]);
+// Tokens an MTA alert can mention for this route.
+const tokensOf = pathTags;
+const normKey = v => str(v).toUpperCase().replace(/[-\s]?SBS$/, '').replace(/\s+TRAIN$/, '');
+const alertKey = a => normKey(a && a.route);
+// Every line an alert names: `route` and the `routes` list (one alert can cover A, C and D).
+const alertKeys = a => [...new Set([alertKey(a), ...arr(a && a.routes).map(normKey)].filter(Boolean))];
 const routeTag = key => LINE[key] ? bullet(key) : h`<span class="tr-rtag">${key || 'MTA'}</span>`;
+// The route's lines as one strip: the Q70 tag, then the E. Only for routes with a subway leg.
+const tagStrip = (r, cls = '') => linesIn(r).length ? h`<span class="tr-lines${cls}">${pathTags(r).map(routeTag)}</span>` : '';
 
 // ---------- status: traffic, weather, alerts ----------
 const status = () => obj(N.data.status) || {};
@@ -226,7 +284,7 @@ const clock = iso => {
 };
 // Minutes since the trip data last checked status (null when it never says).
 const statusAge = () => { const at = T(str(status().checked_at)); return at == null ? null : (nowMs() - at) / 60000; };
-const STALE_MIN = 180;
+const STALE_MIN = 180, WX_OLD_MIN = 720;
 const statusStale = () => { const a = statusAge(); return a != null && a > STALE_MIN; };
 function trafficFor(key) {
   const st = status(), t = obj(st.traffic);
@@ -239,7 +297,9 @@ function trafficFor(key) {
   const delta = typ != null ? min - typ : null;
   const segs = arr(x.segments).filter(s => obj(s) && str(s.name));
   return {min, typ, delta, slow: typ != null && (min / typ >= 1.25 || delta >= 15), segs, text: str(x.text), at,
-    fresh: age != null && age <= 60 && age > -15};
+    fresh: age != null && age <= 60 && age > -15,
+    // Days-old (or undated) drive times say nothing about the road now: show the guide's range instead.
+    old: age == null || age > WX_OLD_MIN || age < -15};
 }
 const carRange = m => { const lo = Math.max(5, 5 * Math.floor(m / 5)); return `${lo}–${lo + 10}`; };
 const WET = /rain|shower|drizzle|snow|sleet|storm|thunder/i;
@@ -271,15 +331,36 @@ function wetSoon(w, from = nowMs(), hours = 4) {
   return x ? {at: T(x.t) <= from + 10 * 60000 ? null : x.t, word: wetWord(x.text), pct: num(x.precip_pct)} : null;
 }
 const wetLabel = s => s.at ? `${s.word} likely from ${N.time(s.at, 'NYC')}` : `${s.word} now`;
+// A week-old alert is planned work or long cleared; one with no date is kept.
+const ALERT_DAYS = 7;
 function alerts() {
   const t = obj(status().transit);
-  return t ? arr(t.alerts).filter(a => obj(a) && str(a.text)) : null;
+  if (!t) return null;
+  const old = nowMs() - ALERT_DAYS * 86400000;
+  return arr(t.alerts).filter(a => obj(a) && str(a.text) && !(T(a.updated) != null && T(a.updated) < old));
 }
-const alertsFor = (r, list) => { const k = tokensOf(r); return k.length ? (list || []).filter(a => k.includes(alertKey(a))) : []; };
+// The way an alert's first sentence names ("Manhattan-bound", "Flushing-bound"): 'city', 'lga'
+// or null. An alert for the other way from this trip is left out.
+const CITY_BOUND = /\b(?:manhattan|world trade center|brooklyn|coney island(?:-stillwell av)?|downtown|34 st-hudson yards|hudson yards|jackson heights|woodside)-bound\b/i;
+const LGA_BOUND = /\b(?:queens|jamaica(?:-179 st)?|flushing(?:-main st)?|forest hills(?:-71 av)?|astoria(?:-ditmars blvd)?|ditmars blvd|laguardia(?: airport)?)-bound\b/i;
+function wayOf(a) {
+  const s = str(a.text).split(/\.\s/)[0], c = s.search(CITY_BOUND), q = s.search(LGA_BOUND);
+  if (c < 0 && q < 0) return null;
+  return q < 0 || (c >= 0 && c < q) ? 'city' : 'lga';
+}
+const ourWay = (a, dir) => { const w = wayOf(a); return !w || w === (dir === 'hotel' ? 'city' : 'lga'); };
+const alertsFor = (r, list) => { const k = tokensOf(r); return k.length ? (list || []).filter(a => alertKeys(a).some(x => k.includes(x))) : []; };
+// The lines on route r that these alerts name, for "E alert below".
+const hitKeys = (r, list) => { const k = tokensOf(r); return [...new Set(list.flatMap(a => alertKeys(a).filter(x => k.includes(x))))]; };
 const checkedAt = () => { const at = str(status().checked_at); return T(at) != null ? `Checked ${clock(at)}` : ''; };
 
 // ---------- direction ----------
-let chosen = null;   // 'hotel' | 'lga' once the traveller picks one; null follows the trip
+// The traveller's pick holds for the rest of that New York day; after that the
+// page follows the trip again (an app left open from arrival to return day
+// would otherwise still say "To hotel").
+let chosen = null;   // {dir: 'hotel' | 'lga', day: 'YYYY-MM-DD'} or null
+const nyDay = () => N.ymd(N.now(), 'NYC');
+const choose = d => { chosen = DIRS[d] ? {dir: d, day: nyDay()} : null; };
 const retLeg = () => safe(() => N.dirLegs('ret')[0], 'ret leg', null) || null;
 const outLast = () => { const l = safe(() => N.dirLegs('out'), 'out legs', []) || []; return l[l.length - 1] || null; };
 function autoDir() {
@@ -292,7 +373,7 @@ function autoDir() {
   }
   return 'hotel';
 }
-const curDir = () => chosen || autoDir();
+const curDir = () => chosen && chosen.day === nyDay() ? chosen.dir : autoDir();
 
 // ---------- what to take now ----------
 // The time the trip will actually happen: after bags on arrival day, the
@@ -320,7 +401,7 @@ function context(dir) {
   let nearRail = null;
   if (ll) { const dp = N.dist(ll, PENN), dg = N.dist(ll, GCM); if (Math.min(dp, dg) <= 800) nearRail = dp <= dg ? 'Penn Station' : 'Grand Central'; }
   const uptown = !!(ll && ll.lat >= 40.797 && ll.lon <= -73.93);
-  const al = alerts();
+  const al0 = alerts(), al = al0 && al0.filter(a => ourWay(a, dir));
   return {dir, now, t, when, day, min, weekday, rush, night, early: min < 420 && dir === 'lga',
     tr, trafficNow, slow: trafficNow && tr.slow, w, wx, wet: !!(wx && wx.wet), hot: !!(wx && wx.temp != null && wx.temp >= 88),
     // Alerts from an old check are still listed, but they no longer steer the pick.
@@ -354,13 +435,13 @@ function whyFor(r, c, list) {
   if (k === 'car') {
     const pro = [];
     if (c.wet && c.wx) pro.push(c.wx.at && T(c.wx.at) > c.now + 20 * 60000 ? `${wetWord(c.wx.text)} likely by ${N.time(c.wx.at, 'NYC')}` : `${wetWord(c.wx.text)} at LGA`);
-    const hit = [...new Set(list.filter(x => modeOf(x.r).kind === 'transit').flatMap(x => alertsFor(x.r, c.recent).map(alertKey)))];
-    if (hit.length) pro.push(`delays on the ${andJoin(hit)}`);
+    const hit = [...new Set(list.filter(x => modeOf(x.r).kind === 'transit').flatMap(x => hitKeys(x.r, alertsFor(x.r, c.recent))))];
+    if (hit.length) pro.push(`alerts on the ${andJoin(hit)}`);
     if (c.night) pro.push('trains and buses run less often at this hour');
     let s = pro.length ? `${cap1(andJoin(pro))}, so a car is the easier ride.`
       : m === 'car' && c.early ? 'Early flight: book the day before so the car is waiting when you come down.'
       : m === 'taxi' ? (c.dir === 'hotel' ? 'Official line on the Level 2 curb, just outside baggage claim. Simplest with bags.' : (c.ho ? 'Door to door with bags; the hotel can call one.' : 'Door to door with bags; hail one on any avenue.'))
-      : m === 'rideshare' ? 'The price is fixed before you go.' : str(r.best_when);
+      : m === 'rideshare' ? 'The price is fixed before you go.' : txt(r.best_when);
     if (c.trafficNow) s += c.slow ? ` Roads are slow: about ${c.tr.min} min by car.` : ` Roads are normal: about ${c.tr.min} min by car.`;
     return s;
   }
@@ -369,7 +450,7 @@ function whyFor(r, c, list) {
   const road = q70 ? ' Only the Q70 part is on the road.' : '';
   if (c.slow && c.tr.delta != null) return `Roads are ${c.tr.delta} min slower than usual.${road}`;
   if (c.rush) return `Weekday rush hour, when cars crawl.${road}`;
-  return str(r.best_when) || 'Steady in any traffic.';
+  return txt(r.best_when) || 'Steady in any traffic.';
 }
 function rank(dir) {
   const c = context(dir);
@@ -380,10 +461,48 @@ function rank(dir) {
 }
 const bestLabel = c => c.when === 'land' ? 'Best when you land' : c.when === 'leave' ? `Best for ${N.time(c.t, 'NYC')}` : 'Best now';
 
+// ---------- shared with Today and Airports ----------
+// The pick and leave time this screen shows, so every screen names the same ones. A direction is
+// 'hotel' or 'lga'; 'to-hotel', 'to_lga' and the like work too. Anything else gives null.
+const dirOf = d => ({hotel: 'hotel', 'to-hotel': 'hotel', to_hotel: 'hotel', lga: 'lga', 'to-lga': 'lga', to_lga: 'lga'})[str(d).toLowerCase()] || null;
+// The planned leave for the return flight while that flight is still ahead; null without one.
+function retLeave() {
+  if (safe(() => N.phase(), 'phase', 'stay') === 'after') return null;
+  const lv = obj(safe(() => N.leave('ret'), 'leave', null));
+  if (!lv || T(lv.at) == null) return null;
+  const leg = obj(lv.leg) || {}, dep = T(obj(leg.dep) && leg.dep.time);
+  return dep != null && dep < nowMs() ? null : lv;
+}
+// N.leaveBy('lga') → {at, late, arrive, bagdrop, drive, buffer, source}: the "Leave the hotel by"
+// card. Only the trip to LGA has one.
+N.leaveBy = dir => {
+  if (dirOf(dir) !== 'lga') return null;
+  const lv = retLeave();
+  if (!lv) return null;
+  return {at: lv.at, late: T(lv.at) < nowMs(), arrive: lv.arrive || null, bagdrop: lv.bagdrop || null,
+    drive: num(lv.drive), buffer: num(lv.buffer) || 0, source: str(lv.source) || 'typical'};
+};
+// N.bestRoute(dir, now) → {id, name, mins: '45–75 min', range: [45, 75], leave, label, why}: the
+// option marked best on #transit at `now` (a Date, ISO time or ms; the clock when left out).
+N.bestRoute = (dir, now) => {
+  const d = dirOf(dir);
+  if (!d) return null;
+  const prev = nowAt;
+  nowAt = now == null ? null : T(now);
+  try {
+    const R = rank(d);
+    if (!R.best) return null;
+    const r = R.best.r, rg = rangeOf(r.min), a = rg ? rg.split('–').map(Number) : [];
+    const lv = d === 'lga' ? N.leaveBy('lga') : null;
+    return {id: str(r.id), name: str(r.name), mins: rg ? `${rg} min` : '', range: a.length ? [a[0], a[a.length - 1]] : null,
+      leave: lv ? lv.at : null, label: bestLabel(R.c), why: R.why};
+  } finally { nowAt = prev; }
+};
+
 // ---------- shared pieces ----------
 function hotelPill(ho) {
   if (!ho) {
-    return h`<a class="tr-pill" href="#wallet">
+    return h`<a class="tr-pill" href="#wallet/hotel">
       <span class="tr-pin-ic">${icon('map-pin')}</span>
       <span class="grow"><b>Add your hotel in Wallet</b><small>Until then, times and links are to Midtown.</small></span>
       ${icon('chevron-right', 'tr-chev')}</a>`;
@@ -399,8 +518,28 @@ function alertRow(a) {
   const up = T(a.updated) != null ? `Updated ${clock(a.updated)}` : '';
   // MTA writes lines as "[7]"; show them as the same bullets the routes use.
   const text = str(a.text).split(/\[([A-Z0-9]{1,2})\]/).map((p, i) => i % 2 ? (LINE[p] ? bullet(p) : `[${p}]`) : p);
-  return h`<div class="tr-alert">${routeTag(k)}<div class="grow"><p>${text}</p>${up ? h`<small>${up}</small>` : ''}</div></div>`;
+  // Three lines at most; More shows when clampAlerts finds the text was cut.
+  return h`<div class="tr-alert">${routeTag(k)}<div class="grow"><p>${text}</p>
+    <div class="tr-af">${up ? h`<small>${up}</small>` : ''}<button class="tr-more" data-act="trMore" aria-expanded="false">More</button></div></div></div>`;
 }
+// Marks the alerts whose text runs past three lines, once the page is laid out and fonts are in.
+function clampAlerts(root) {
+  const run = () => N.$$('.tr-alert:not(.open)', root).forEach(el => {
+    const p = N.$('p', el);
+    if (p) el.classList.toggle('cut', p.scrollHeight > p.clientHeight + 2);
+  });
+  requestAnimationFrame(run);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(run).catch(() => {});
+}
+const alertActs = {
+  trMore(el) {
+    const a = el.closest('.tr-alert');
+    if (!a) return;
+    const open = a.classList.toggle('open');
+    el.setAttribute('aria-expanded', String(open));
+    el.textContent = open ? 'Less' : 'More';
+  },
+};
 const BRIDGE = `<svg class="il tr-bridge" viewBox="0 0 220 150" aria-hidden="true"><g class="lk" stroke-width="7"><path d="M8 150Q64 26 122 150"/><path d="M96 150Q154 44 214 150"/></g><g class="lk" stroke-width="4"><path d="M0 104H220"/><path d="M30 104v46M60 104v46M150 104v46M190 104v46"/></g></svg>`;
 
 // ---------- #transit ----------
@@ -416,20 +555,27 @@ function heroHead(dir, R) {
     else if (at && now >= at && now - at < 4 * 3600000) sub = `${l.state === 'landed' ? 'Landed' : 'Arrived about'} ${N.time(at, 'LGA')} · bags and rides on Level 2`;
     else { const n = R.list.length; sub = n ? `${N.plural(n, 'way')} in from Terminal B` : ''; }
   } else {
-    ey = `${to} → LGA Terminal B${rl && rl.date ? ' · ' + N.date(rl.date + 'T16:00:00Z', 'NYC').split(' ').slice(0, 2).join(' ') : ''}`;
+    // The return day, while it is still ahead (or today).
+    const rd = rl && /^\d{4}-\d{2}-\d{2}$/.test(str(rl.date)) && rl.date >= N.ymd(N.now(), 'NYC') ? rl.date : '';
+    ey = `${to} → LGA Terminal B${rd ? ' · ' + N.date(rd + 'T16:00:00Z', 'NYC').split(' ').slice(0, 2).join(' ') : ''}`;
     title = 'To LGA';
-    const tsa = obj(N.airportLive('LGA').tsa);
-    if (tsa && num(tsa.wait_min) != null) sub = `Terminal B TSA about ${N.dur(tsa.wait_min)}${tsa.pre_min != null && num(tsa.pre_min) != null ? ` · PreCheck ${tsa.pre_min}` : ''}`;
-    else sub = 'AA check-in: Terminal B, Level 3';
+    // The wait has no time of its own: it is as old as the last status check, and a line length
+    // from hours (or days) ago says nothing about the line now.
+    const tsa = obj(N.airportLive('LGA').tsa), age = statusAge();
+    if (tsa && num(tsa.wait_min) > 0 && age != null && age <= STALE_MIN && age > -15) {
+      sub = `Terminal B TSA about ${N.dur(tsa.wait_min)}${num(tsa.pre_min) > 0 ? ` · PreCheck ${N.dur(tsa.pre_min)}` : ''}`;
+      if (age > 45) sub += ` (checked ${clock(status().checked_at)})`;
+    } else sub = 'AA check-in: Terminal B, Level 3';
   }
-  return h`<p class="ey ell tr-ey">${ey}</p><h1 class="dp tr-dp">${title}</h1>${sub ? h`<p class="tr-hsub">${sub}</p>` : ''}`;
+  return h`<p class="ey tr-ey">${ey}</p><h1 class="dp tr-dp">${title}</h1>${sub ? h`<p class="tr-hsub">${sub}</p>` : ''}`;
 }
 function leaveCard(R) {
   const ph = safe(() => N.phase(), 'phase', 'stay');
   if (ph === 'after') return '';
   const rl = retLeg();
   if (!rl) return '';
-  const lv = safe(() => N.leave('ret'), 'leave', null);
+  const lv0 = obj(safe(() => N.leave('ret'), 'leave', null));
+  const lv = lv0 && T(lv0.at) != null ? lv0 : null;
   const g = obj(N.data.guide && N.data.guide.plan && N.data.guide.plan.ret) || {};
   if (!lv) {
     const before = num(g.arrive_before_min) || 100;
@@ -444,14 +590,20 @@ function leaveCard(R) {
       <p class="tr-lp">${str(rl.flight) || 'The first flight'} to ${str(rl.to) || 'CLT'} has no confirmed departure. Plan to reach Terminal B ${N.dur(before)} before it leaves; the drive is about ${drive} min${tr ? ` (traffic checked ${clock(tr.at)})` : ' with normal traffic'}. Check the AA app for the time.</p>
     </div>`;
   }
-  const at = T(lv.at), dep = lv.leg && lv.leg.dep && lv.leg.dep.time, now = nowMs();
-  if (dep && T(dep) < now) return '';
-  const late = at < now;
+  // The same leave time Today shows (N.leaveBy); none once the flight has left.
+  if (!retLeave()) return '';
+  const leg = obj(lv.leg) || {}, dep = obj(leg.dep) && leg.dep.time;
+  const late = T(lv.at) < nowMs();
   const src = lv.source === 'traffic' && R.c.tr ? `traffic checked ${clock(R.c.tr.at)}` : 'typical traffic';
+  const drive = num(lv.drive) != null ? `${Math.round(lv.drive)} min drive (${src})${num(lv.buffer) ? ` + ${lv.buffer} min buffer` : ''}` : '';
+  const there = T(lv.arrive) != null ? `at Terminal B by ${N.time(lv.arrive, 'LGA')}` : '';
+  const flight = T(dep) != null ? `${str(leg.flight) || 'Your flight'} leaves ${N.time(dep, 'LGA')}` : '';
+  const bag = T(lv.bagdrop) != null ? `bag drop closes ${N.time(lv.bagdrop, 'LGA')}` : '';
+  const line = [[drive, there].filter(Boolean).join(', '), [flight, bag].filter(Boolean).join('; ')].filter(Boolean).map(cap1).join('. ');
   return h`<div class="card ${late ? 'rose' : 'sand'} tight tr-leave">
     <p class="ey">${late ? 'Past the leave time' : 'Leave the hotel by'}</p>
     <div class="tr-lrow"><b class="tr-big" data-k="tr-leave">${late ? 'Now' : N.time(lv.at, 'NYC')}</b>${late ? '' : h`<span class="tr-in">in <span data-until="${lv.at}">${N.until(lv.at)}</span></span>`}</div>
-    <p class="tr-lp">${lv.drive} min drive (${src})${lv.buffer ? ` + ${lv.buffer} min buffer` : ''}, at Terminal B by ${N.time(lv.arrive, 'LGA')}. ${str(lv.leg.flight)} leaves ${N.time(dep, 'LGA')}; bag drop closes ${N.time(lv.bagdrop, 'LGA')}.</p>
+    ${line ? h`<p class="tr-lp">${line}.${lv.source !== 'traffic' && !late ? ' Traffic updates closer to the time.' : ''}</p>` : ''}
   </div>`;
 }
 function arrivalLine(R) {
@@ -465,7 +617,7 @@ function arrivalLine(R) {
 function trafficCard(dir, R) {
   const c = R.c, tr = c.tr, to = dir === 'lga' ? 'to LGA' : c.ho ? 'by car' : 'to Midtown';
   let head, sub = [], foot = '';
-  if (tr) {
+  if (tr && !tr.old) {
     head = tr.fresh ? `About ${carRange(tr.min)} min ${to} now` : `About ${carRange(tr.min)} min ${to} at ${clock(tr.at)}`;
     const slowSegs = tr.segs.filter(s => /slow|heavy|jam|stop/i.test(str(s.status)) || (num(s.mph) != null && s.mph < 25));
     const segText = (slowSegs.length ? slowSegs : tr.segs).slice(0, 3).map(s => num(s.mph) != null ? `${str(s.name)} ${Math.round(s.mph)} mph` : str(s.name));
@@ -473,11 +625,13 @@ function trafficCard(dir, R) {
     sub.push([lead, ...segText].filter(Boolean).join(' · ') || tr.text);
     foot = [tr.typ != null ? `Usually ${tr.typ} min` : '', tr.at ? `${tr.fresh ? 'Checked' : 'Last checked'} ${clock(tr.at)}` : ''].filter(Boolean).join(' · ');
   } else {
-    const car = routesOf(dir).find(r => modeOf(r).kind === 'car' && r.min);
-    head = 'No traffic check yet';
+    const car = routesOf(dir).find(r => modeOf(r).kind === 'car' && rangeOf(r.min));
+    head = tr ? 'No recent traffic check' : 'No traffic check yet';
     sub.push(`Plan on ${car ? rangeOf(car.min) : dir === 'lga' ? '30–60' : '35–75'} min by car; weekday 4–7p is the slowest.`);
+    if (tr && clock(tr.at)) foot = `Last checked ${clock(tr.at)}`;
   }
-  const w = c.w, soon = wetSoon(w);
+  // A reading more than half a day old says nothing about the weather now.
+  const age = statusAge(), w = age != null && age > WX_OLD_MIN ? null : c.w, soon = wetSoon(w);
   let wxLine = '';
   if (w && (w.temp != null || w.text)) {
     const now = [w.temp != null ? `${Math.round(w.temp)}°` : '', w.text ? w.text.toLowerCase() : ''].filter(Boolean).join(' and ');
@@ -506,56 +660,62 @@ function routeTraffic(r, dir, c) {
 }
 function optionRow(x, R, dir, k) {
   const r = x.r, best = R.best && R.best.r === r;
-  const c = R.c, lines = linesIn(r), hits = alertsFor(r, c.alerts);
+  const c = R.c, hits = alertsFor(r, c.alerts);
   const rg = rangeOf(r.min);
-  const meta = [str(r.cost)];
+  const [price, extra] = costParts(r);
   const trk = routeTraffic(r, dir, c);
-  if (trk && trk.fresh) meta.push(`${trk.min} min drive now`);
-  const lineTags = lines.length ? h`<span class="tr-lines">${lines.map(bullet)}</span>` : '';
+  // The price and the drive time each keep to one line; the row breaks around them.
+  const parts = [price ? h`<span class="nw">${price}</span>${extra ? ' ' + extra : ''}` : '',
+    trk && trk.fresh ? h`<span class="nw">${trk.min} min drive now</span>` : ''].filter(Boolean);
   return h`<a class="op tr-op${best ? ' best' : ''} rise" style="${`animation-delay:${k * 40}ms`}" href="${'#route/' + dir + '/' + r.id}">
     <span class="ic">${icon(routeIcon(r))}</span>
-    <span class="grow tr-opm">
+    <span class="tr-opm">
       <span class="tr-opn"><b>${str(r.name)}</b></span>
-      ${lineTags}
-      <small>${meta.filter(Boolean).join(' · ') || str(r.summary)}</small>
-      ${hits.length ? h`<small class="tr-warn">${icon('alert-triangle')}${hits.map(alertKey).filter((v, i, a) => a.indexOf(v) === i).join(', ')} alert below</small>` : ''}
-      ${best ? h`<span class="tr-best"><b>${icon('thumb-up')}${bestLabel(c)}</b> ${R.why}</span>` : ''}
+      ${tagStrip(r)}
+      <small>${parts.length ? parts.map((p, i) => h`${i ? ' · ' : ''}${p}`) : str(r.summary)}</small>
+      ${hits.length ? h`<small class="tr-warn">${icon('alert-triangle')}${andJoin(hitKeys(r, hits))} ${hitKeys(r, hits).length > 1 ? 'alerts' : 'alert'} below</small>` : ''}
     </span>
     <span class="tr-opt">${rg ? h`<b>${rg}</b><small>min</small>` : h`<small>Varies</small>`}</span>
+    ${icon('chevron-right', 'tr-chev')}
+    ${best ? h`<span class="tr-best"><b>${icon('thumb-up')}${bestLabel(c)}</b><span>${R.why}</span></span>` : ''}
   </a>`;
 }
+// Alerts for the lines these routes ride, this way, from the last week. Other lines are left out.
 function alertsSec(dir, R) {
-  const list = alerts();
-  const toks = new Set(routesOf(dir).flatMap(tokensOf));
-  if (list == null) {
-    return h`<div class="sec"><p class="ey">Subway and bus alerts</p><div class="co plain">${icon('info-circle')}<span>No MTA check yet. Alerts for the E, Q70 and other lines on these routes show here once the trip data updates.</span></div></div>`;
+  const toks = [...new Set(routesOf(dir).flatMap(tokensOf))];
+  if (!toks.length) return '';
+  const ey = h`<p class="ey">Subway and bus alerts</p>`;
+  const lines = w => toks.length <= 5 ? `the ${andJoin(toks, w)}` : 'the lines on these routes';
+  if (!R.c.hasAlerts) {
+    return h`<div class="sec">${ey}<div class="co plain">${icon('info-circle')}<span>No MTA check yet. Alerts for ${lines('and')} show here after the next update.</span></div></div>`;
   }
-  const rel = list.filter(a => toks.has(alertKey(a))), rest = list.filter(a => !toks.has(alertKey(a)));
-  const ck = checkedAt();
-  if (!list.length) {
-    return h`<div class="sec"><p class="ey">Subway and bus alerts</p><div class="co plain">${icon('circle-check')}<span>No alerts for the subway or buses on these routes${ck ? ' · ' + ck : ''}.</span></div></div>`;
+  const rel = R.c.alerts.filter(a => alertKeys(a).some(x => toks.includes(x)));
+  const ck = checkedAt(), stale = statusStale();
+  if (!rel.length) {
+    return h`<div class="sec">${ey}<div class="co plain">${icon('circle-check')}<span>No alerts for ${lines('or')}${ck ? h`<span class="nw"> · ${ck}</span>` : ''}${stale ? '; there may be new ones since' : ''}.</span></div></div>`;
   }
-  return h`<div class="sec"><p class="ey">Subway and bus alerts</p>
-    ${rel.length ? h`<div class="tr-alerts">${rel.slice(0, 6).map(alertRow)}</div>` : ''}
-    ${rest.length && rel.length < 6 ? h`${rel.length ? h`<p class="ey tr-sub">Other lines</p>` : ''}<div class="tr-alerts">${rest.slice(0, 6 - rel.length).map(alertRow)}</div>` : ''}
-    ${!rel.length ? h`<p class="tr-note">None of these are on the routes above.</p>` : ''}
-    ${statusStale() && ck ? h`<p class="tr-note">${ck}; these may have cleared since.</p>` : ''}
+  return h`<div class="sec">${ey}
+    <div class="tr-alerts">${rel.map(alertRow)}</div>
+    ${stale && ck ? h`<p class="tr-note">${ck}; these may have cleared since.</p>` : ''}
   </div>`;
 }
 function linksSec(dir, R) {
-  const ho = R.c.ho, d = destFor(dir, ho);
+  const ho = R.c.ho, d = destFor(dir, ho), priv = privateDest(dir, ho);
   const k = R.best ? modeOf(R.best.r).kind : 'car';
   const mode = k === 'transit' ? 'r' : 'd';
-  const note = dir === 'hotel' && !ho ? 'No hotel saved, so these go to Midtown.'
-    : dir === 'hotel' && ho && !ho.address && !(ho.ll && ho.ll.exact) ? 'The hotel has no address saved, so these go to Midtown.'
-    : dir === 'hotel' && ho && ho.local && !(ho.ll && ho.ll.exact) ? 'Lyft opens without a destination; paste the address there.' : '';
+  const note = dir !== 'hotel' ? ''
+    : !ho ? 'No hotel saved, so these go to Midtown.'
+    : !ho.address && !(ho.ll && ho.ll.exact) ? 'The hotel has no address saved, so these go to Midtown.'
+    : priv ? PRIVATE_NOTE
+    : !(ho.ll && ho.ll.exact) ? 'Lyft opens without a destination; paste the address there.' : '';
   return h`<div class="sec"><p class="ey">Open in</p>
-    <div class="wrap tr-links">
+    ${priv ? copyRow(ho) : ''}
+    <div class="tr-links${priv ? ' tr-after' : ''}">
       ${ext(appleUrl(d, mode), 'Maps', 'dk2')}
       ${ext(googleUrl(d, mode), 'Google', 'cr')}
       ${ext(uberUrl(dir, ho), 'Uber', 'cr')}
       ${ext(lyftUrl(dir, ho), 'Lyft', 'cr')}
-      ${dir === 'hotel' && ho && ho.address ? h`<button class="chip ghost tr-chip" data-act="copy" data-copy="${ho.address}">${icon('copy')}Copy address</button>` : ''}
+      ${dir === 'hotel' && ho && ho.address && !priv ? h`<button class="chip ghost tr-chip tr-span" data-act="copy" data-copy="${ho.address}">${icon('copy')}Copy address</button>` : ''}
     </div>
     ${note ? h`<p class="tr-note">${note}</p>` : ''}
   </div>`;
@@ -568,8 +728,8 @@ function tipsSec() {
 function timesNote(ho) {
   const ll = ho && ho.ll;
   if (!ll) return 'Times are door to door between Terminal B and Midtown.';
-  return N.dist(ll, MIDTOWN) <= 2500 ? 'Times are door to door to Midtown, close to your hotel.'
-    : 'Times are door to door to Midtown; your hotel is farther out, so allow a little more.';
+  return N.dist(ll, MIDTOWN) <= 2500 ? 'Times are door to door between Terminal B and Midtown, where your hotel is.'
+    : 'Times are door to door between Terminal B and Midtown; your hotel is farther out, so allow a little more.';
 }
 function dirBody(dir) {
   const R = rank(dir);
@@ -614,14 +774,16 @@ N.screen('transit', {
       </div>`,
     };
   },
+  mount(ctx, view) { clampAlerts(view); },
   tick() {
     const s = safe(transitSig, 'sig', '');
     if (s && s !== lastSig) N.rerender();
   },
   actions: {
+    ...alertActs,
     trDir(el, ev, ctx, arg) {
       if (!DIRS[arg] || arg === curDir()) return;
-      chosen = arg;
+      choose(arg);
       N.$$('.tr-ps button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.arg === arg)));
       const head = N.$('[data-tr="head"]'), body = N.$('[data-tr="dir"]');
       if (!head || !body) { N.rerender(); return; }
@@ -629,6 +791,7 @@ N.screen('transit', {
         const R = rank(arg);
         head.innerHTML = String(safe(() => heroHead(arg, R), 'hero'));
         body.innerHTML = String(dirBody(arg));
+        clampAlerts(body);
         lastSig = safe(transitSig, 'sig', '');
       }, arg === 'lga' ? 1 : -1);
     },
@@ -645,12 +808,15 @@ function pinIcon(L, cls, inner, size = [36, 44], anchor = [18, 42]) {
   return L.divIcon({className: 'tr-pinw', html: `<span class="tr-mpin ${cls}">${inner}</span>`, iconSize: size, iconAnchor: anchor});
 }
 // Draws the offline NYC outline under the tiles, then the tiles. Returns the map.
-async function baseMap(box, alive, interactive = true) {
+// Maps on the page are still pictures, so every swipe on them scrolls the page; only the
+// full-screen map (full) pans and zooms.
+async function baseMap(box, alive, full = false) {
   const L = await N.loadLeaflet();
   if (!alive() || !box.isConnected) return null;
-  const map = L.map(box, {zoomControl: false, dragging: interactive, touchZoom: interactive, scrollWheelZoom: false, doubleClickZoom: interactive,
-    boxZoom: false, keyboard: false, inertia: true, zoomSnap: .25, fadeAnimation: false, attributionControl: true});
-  map.attributionControl.setPrefix(false);
+  const map = L.map(box, {zoomControl: false, dragging: full, touchZoom: full, scrollWheelZoom: full, doubleClickZoom: full,
+    boxZoom: false, keyboard: false, tap: false, inertia: full, zoomSnap: .25, fadeAnimation: false, zoomAnimation: full,
+    maxBoundsViscosity: 1, bounceAtZoomLimits: false, attributionControl: false});
+  map.attributionControl = L.control.attribution({position: 'bottomleft', prefix: false}).addTo(map);
   const pane = map.createPane('trBase');
   pane.style.zIndex = 150;
   pane.style.pointerEvents = 'none';
@@ -710,12 +876,11 @@ function showMe(st, w, fit) {
   if (!st || st.dead || !st.map || !w || !hasLL(w)) return;
   const L = st.L, ll = [w.lat, w.lon];
   const far = N.dist(w, LGA) > FAR_M;
-  if (far) { if (fit) N.toast(`You’re ${N.distText(N.dist(w, LGA))} from LGA; the map stays on New York.`); return; }
+  if (far) { if (fit) N.toast(`You’re about ${Math.round(N.dist(w, LGA) / 1609.34).toLocaleString('en-US')} mi from LGA; the map stays on New York.`); return; }
   if (st.me) st.me.setLatLng(ll);
   else st.me = L.marker(ll, {interactive: false, keyboard: false, zIndexOffset: 500,
     icon: L.divIcon({className: 'tr-pinw', html: '<span class="tr-me"></span>', iconSize: [22, 22], iconAnchor: [11, 11]})}).addTo(st.map);
   if (fit && st.fit) st.fit(true);
-  if (st.onMe) st.onMe(w);
 }
 async function locate(el) {
   const lab = N.$('.tr-locl', el);
@@ -728,10 +893,141 @@ async function locate(el) {
   if (!w) { N.toast('Location is off for this app. Turn it on in Settings › Privacy › Location Services.'); return; }
   showMe(live.route || live.hotel, w, true);
 }
-const zoomBy = d => { const st = live.route || live.hotel; if (st && st.map) st.map.setZoom(st.map.getZoom() + d); };
-const mapControls = () => h`<div class="tr-zoom">
-  <button class="tr-zb" data-act="trZoom" data-arg="1" aria-label="Zoom in">${icon('plus')}</button>
-  <button class="tr-zb" data-act="trZoom" data-arg="-1" aria-label="Zoom out">${icon('minus')}</button></div>`;
+// Fit for the maps on the page: room above for the pins' heads, and for the Expand button.
+const PAD = {paddingTopLeft: [40, 72], paddingBottomRight: [56, 48]};
+// Fits st's map to its points, and the "you" dot when asked.
+function fitMap(st, pad, withMe) {
+  const b = st.L.latLngBounds(st.pts());
+  if (withMe && st.me) b.extend(st.me.getLatLng());
+  st.map.fitBounds(b, {...pad, maxZoom: st.maxZoom, animate: !!withMe && !N.reduce && st.map.options.zoomAnimation});
+}
+// Spreads the numbered pins on a page map so none hides another or the hotel pin's head:
+// nearest place first, each moved the shortest way that clears the ones already placed.
+// The page map never pans, so the spread holds until the next fit.
+function spread(map, mks, home) {
+  const sz = map.getSize(), hp = map.latLngToContainerPoint(home);
+  const taken = [[hp.x, hp.y - 24, 36], [sz.x - 32, sz.y - 32, 40]];   // hotel pin head; the Expand button
+  const inside = (x, y) => x > 16 && y > 16 && x < sz.x - 16 && y < sz.y - 16;
+  const clear = (x, y) => inside(x, y) && taken.every(([a, b, r]) => Math.hypot(x - a, y - b) >= r);
+  mks.forEach(({mk, ll}) => {
+    const p = map.latLngToContainerPoint(ll);
+    let at = clear(p.x, p.y) ? [p.x, p.y] : null;
+    if (!at) {
+      const hit = taken.find(([a, b, r]) => Math.hypot(p.x - a, p.y - b) < r);
+      const away = hit ? Math.atan2(p.y - hit[1], p.x - hit[0]) : 0;
+      for (let d = 8; !at && d <= 72; d += 8) {
+        for (let k = 0; k < 12 && !at; k++) {
+          const t = away + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * Math.PI / 6;
+          const x = p.x + d * Math.cos(t), y = p.y + d * Math.sin(t);
+          if (clear(x, y)) at = [x, y];
+        }
+      }
+    }
+    at = at || [p.x, p.y];
+    taken.push([at[0], at[1], 30]);
+    mk.setLatLng(map.containerPointToLatLng(at));
+  });
+}
+
+// ---------- full-screen map ----------
+// The map on the page is a still picture; the whole of it is the button that opens this one,
+// which takes every gesture and is held to the area around the trip. It adds a history entry,
+// so Back closes it.
+let full = null;
+const mapCard = (map, label) => h`<div class="tr-mapc">${map}
+  <button class="tr-mapa" data-act="trMapOpen" aria-label="${label}"><span class="tr-mapx">${icon('arrows-maximize')}</span></button></div>`;
+// Clear of Close and Zoom in at the top right, and of the home indicator. Even left and right,
+// so a fit that hits the outline's edge still centres the trip.
+const FULL_PAD = {paddingTopLeft: [48, 120], paddingBottomRight: [48, 72]};
+function openFull(st) {
+  if (full || !st || st.dead) return;
+  const app = N.$('#app') || document.body, view = N.$('#view'), nav = N.$('.nv');
+  const el = document.createElement('div');
+  el.className = 'tr-full' + (N.reduce ? '' : ' tr-full-in');
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-label', st.label);
+  el.innerHTML = String(h`<div class="tr-map tr-fmap" data-tr="fmap"></div>
+    <div class="tr-fc">
+      <button class="tr-zb" data-act="trFullClose" aria-label="Close map">${icon('x')}</button>
+      <div class="tr-fz">
+        <button class="tr-zb" data-act="trZoom" data-arg="1" aria-label="Zoom in">${icon('plus')}</button>
+        <button class="tr-zb" data-act="trZoom" data-arg="-1" aria-label="Zoom out">${icon('minus')}</button>
+        <button class="tr-zb" data-act="trFit" aria-label="Show the whole map">${icon('zoom-reset')}</button>
+      </div>
+    </div>`);
+  app.appendChild(el);
+  const fs = full = {st, el, view, nav, top: view ? view.scrollTop : 0, prevFocus: document.activeElement,
+    dead: false, map: null, L: null, me: null, maxZoom: st.maxZoom, pts: st.pts, off: []};
+  if (view) { view.style.overflow = 'hidden'; view.inert = true; }
+  if (nav) nav.inert = true;
+  try { history.pushState(Object.assign({}, history.state, {trMap: 1}), ''); fs.pushed = true; } catch { /* Close still works */ }
+  const onPop = () => closeFull();
+  const onKey = ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); shutFull(); } };
+  window.addEventListener('popstate', onPop);
+  document.addEventListener('keydown', onKey, true);
+  fs.off.push(() => window.removeEventListener('popstate', onPop), () => document.removeEventListener('keydown', onKey, true));
+  const x = N.$('[data-act="trFullClose"]', el);
+  if (x) x.focus({preventScroll: true});
+  const box = N.$('[data-tr="fmap"]', el), alive = () => !fs.dead;
+  // Without tiles the map is only the offline outline, so it may not show past that outline's edge.
+  const offline = !tilesOk(N.tiles(N.isDark()));
+  Promise.all([baseMap(box, alive, true), offline ? getBasemap() : null]).then(([res, gj]) => {
+    if (!res) return;
+    const {L, map} = res;
+    fs.L = L; fs.map = map;
+    const bb = gj && Array.isArray(gj.bbox) && gj.bbox.length === 4 && gj.bbox.every(Number.isFinite) ? gj.bbox : null;
+    const data = bb ? L.latLngBounds([bb[1], bb[0]], [bb[3], bb[2]]) : null;
+    // Limits go on before the first view, so opening never starts with a pan back inside them.
+    if (data) { map.setMaxBounds(data); map.setMinZoom(map.getBoundsZoom(data, true)); }
+    if (st.me) { const p = st.me.getLatLng(); showMe(fs, {lat: p.lat, lon: p.lng}, false); }
+    fs.fit = withMe => fitMap(fs, FULL_PAD, withMe);
+    fs.fit(true);
+    // Held to what opened in view plus a margin around the trip: zoom in and look around, never get lost.
+    const hold = map.getBounds().extend(L.latLngBounds(st.pts()).pad(.6));
+    const lim = data ? L.latLngBounds([Math.max(hold.getSouth(), data.getSouth()), Math.max(hold.getWest(), data.getWest())],
+      [Math.min(hold.getNorth(), data.getNorth()), Math.min(hold.getEast(), data.getEast())]) : hold;
+    map.setMaxBounds(lim);
+    map.setMinZoom(Math.max(map.getMinZoom(), Math.min(map.getZoom(), map.getBoundsZoom(lim))));
+    addBase(L, map, box, alive);
+    box.classList.add('tr-ready');
+    st.pins(L, map, true);
+  }).catch(() => { if (alive() && box.isConnected) { box.classList.add('tr-nomap'); box.innerHTML = String(h`<span class="tr-mapph">${icon('map')}The map didn’t load.</span>`); } });
+}
+// Close from the button, Escape or a pin: step back over the history entry the map added.
+function shutFull(then) {
+  const fs = full;
+  if (!fs) return;
+  fs.then = then;
+  if (fs.pushed && history.state && history.state.trMap) {
+    history.back();
+    setTimeout(() => { if (full === fs) closeFull(); }, 700);   // in case Back never arrives
+  } else closeFull();
+}
+// quiet: the page is going away, so nothing is restored.
+function closeFull(quiet = false) {
+  const fs = full;
+  if (!fs) return;
+  full = null;
+  fs.dead = true;
+  fs.off.forEach(f => { try { f(); } catch { /* already gone */ } });
+  if (fs.map) { try { fs.map.remove(); } catch { /* already gone */ } }
+  fs.el.remove();
+  if (fs.view) { fs.view.style.overflow = ''; fs.view.inert = false; }
+  if (fs.nav) fs.nav.inert = false;
+  if (quiet) return;
+  if (fs.view) fs.view.scrollTop = fs.top;
+  if (fs.then) { fs.then(); return; }
+  if (fs.prevFocus && fs.prevFocus.isConnected) fs.prevFocus.focus({preventScroll: true});
+}
+// Map actions on #route and #hotel.
+const mapActs = {
+  trMapOpen: () => openFull(live.route || live.hotel),
+  trFullClose: () => shutFull(),
+  trZoom: (el, ev, ctx, arg) => { if (full && full.map) full.map.setZoom(full.map.getZoom() + (+arg || 1)); },
+  trFit: () => { if (full && full.map) full.fit(true); },
+  trLocate: el => locate(el),
+};
 
 // ---------- #route ----------
 function whereCard(dir, r) {
@@ -756,28 +1052,34 @@ function whereCard(dir, r) {
     ${lk ? h`<a class="tr-lk" href="${web(lk.url)}" target="_blank" rel="noopener">${icon('map')}<span class="grow">${str(lk.label)}</span>${icon('arrow-up-right')}</a>` : ''}
   </div>`;
 }
+// N.icon puts the name into markup unescaped, so only a known sprite id gets through.
+const stepIcon = n => { const s = txt(n); return /^[a-z0-9-]+$/.test(s) && document.getElementById('i-' + s) ? s : 'point'; };
 function stepsList(r) {
-  const steps = arr(r.steps).map(s => typeof s === 'string' ? {text: s} : s).filter(s => obj(s) && str(s.text));
-  if (!steps.length) return h`<div class="co plain">${icon('info-circle')}<span>No step-by-step for this one. ${str(r.summary)}</span></div>`;
-  const total = steps.reduce((a, s) => a + (num(s.min) || 0), 0);
+  const steps = arr(r.steps).map(s => typeof s === 'string' ? {text: s} : s).filter(s => obj(s) && txt(s.text));
+  if (!steps.length) return h`<div class="co plain">${icon('info-circle')}<span>No step-by-step for this one. ${txt(r.summary)}</span></div>`;
+  const mins = s => num(s.min) != null && s.min > 0 ? Math.round(s.min) : 0;
+  const total = steps.reduce((a, s) => a + mins(s), 0);
   return h`<ol class="tr-steps">${steps.map((s, i) => h`<li class="tr-st rise" style="${`animation-delay:${i * 50}ms`}">
-      <span class="tr-sti">${icon(str(s.icon) || 'point')}</span>
-      <div class="grow"><p>${str(s.text)}</p>${str(s.where) ? h`<small>${icon('map-pin')}${str(s.where)}</small>` : ''}</div>
-      ${num(s.min) ? h`<span class="tr-stm">${s.min} min</span>` : ''}
+      <span class="tr-sti">${icon(stepIcon(s.icon))}</span>
+      <div class="grow"><p>${txt(s.text)}</p>${txt(s.where) ? h`<small>${icon('map-pin')}${txt(s.where)}</small>` : ''}</div>
+      ${mins(s) ? h`<span class="tr-stm">${mins(s)} min</span>` : ''}
     </li>`)}</ol>
     ${total ? h`<p class="tr-note">Steps add up to about ${N.dur(total)}${rangeOf(r.min) ? `; allow ${rangeOf(r.min)} min door to door` : ''}.</p>` : ''}`;
 }
 function routeTop(dir, r, R) {
   const c = R.c;
   const isBest = R.best && R.best.r.id === r.id;
-  const uptown = /uptown only|not a midtown route/i.test(str(r.name) + ' ' + str(r.summary));
-  const span = uptown ? 'Uptown, not Midtown' : dir === 'lga' ? (c.ho ? 'Guide times, from Midtown' : 'From Midtown') : (c.ho ? 'Guide times, to Midtown' : 'To Midtown');
+  const uptown = upOnly(r);
+  // The guide times run to Midtown; a hotel well outside it gets a word about that.
+  const far = c.ho && c.ho.ll && N.dist(c.ho.ll, MIDTOWN) > 2500;
+  const span = uptown ? 'Uptown, not Midtown' : !c.ho ? (dir === 'lga' ? 'From Midtown' : 'To Midtown') : far ? 'Allow a little more' : '';
+  const [price, extra] = costParts(r);
   const tiles = [
     ['Door to door', rangeOf(r.min) ? `${rangeOf(r.min)} min` : 'Varies', span],
-    ['Cost', str(r.cost) || 'Not listed', ''],
+    ['Cost', price || 'Not listed', extra],
   ];
   const tr = routeTraffic(r, dir, c);
-  if (tr) tiles.push([tr.fresh ? 'Drive now' : 'Drive', `${tr.min} min`,
+  if (tr && !tr.old) tiles.push([tr.fresh ? 'Drive now' : 'Drive', `${tr.min} min`,
     [tr.typ != null ? `usually ${tr.typ}` : '', `${tr.fresh ? 'checked' : 'last checked'} ${clock(tr.at)}`].filter(Boolean).join(' · ')]);
   const hits = alertsFor(r, c.alerts);
   return h`
@@ -785,15 +1087,15 @@ function routeTop(dir, r, R) {
     ${isBest ? h`<div class="co tr-co">${icon('thumb-up')}<span><b>${bestLabel(c)}.</b> ${R.why}</span></div>`
       : R.best ? h`<a class="co plain tr-co tr-alt" href="${'#route/' + dir + '/' + R.best.r.id}">${icon('arrows-exchange')}<span class="grow">${bestLabel(c)}: <b>${str(R.best.r.name)}</b>. ${R.why}</span>${icon('chevron-right')}</a>` : ''}
     ${hits.length ? h`<div class="tr-alerts">${hits.map(alertRow)}</div>` : ''}
-    ${str(r.best_when) || str(r.avoid_when) ? h`<div class="card tight tr-when">
-      ${str(r.best_when) ? h`<div class="rw tr-wr"><span class="ic">${icon('circle-check')}</span><div><b>Good when</b><small>${str(r.best_when)}</small></div></div>` : ''}
-      ${str(r.avoid_when) ? h`<div class="rw tr-wr"><span class="ic">${icon('alert-circle')}</span><div><b>Skip when</b><small>${str(r.avoid_when)}</small></div></div>` : ''}
+    ${txt(r.best_when) || txt(r.avoid_when) ? h`<div class="card tight tr-when">
+      ${txt(r.best_when) ? h`<div class="rw tr-wr"><span class="ic">${icon('circle-check')}</span><div><b>Good when</b><small>${txt(r.best_when)}</small></div></div>` : ''}
+      ${txt(r.avoid_when) ? h`<div class="rw tr-wr"><span class="ic">${icon('alert-circle')}</span><div><b>Skip when</b><small>${txt(r.avoid_when)}</small></div></div>` : ''}
     </div>` : ''}
     <div class="sec"><p class="ey">Step by step</p>${stepsList(r)}</div>
     <div class="sec">${safe(() => whereCard(dir, r), 'where')}</div>`;
 }
 function routeBottom(dir, r, R) {
-  const ho = R.c.ho, d = destFor(dir, ho), k = modeOf(r).kind;
+  const ho = R.c.ho, d = destFor(dir, ho), k = modeOf(r).kind, priv = privateDest(dir, ho);
   const book = obj(r.book) && web(r.book.url) ? r.book : null;
   const m = str(r.mode);
   const chips = k === 'transit'
@@ -803,23 +1105,33 @@ function routeBottom(dir, r, R) {
       : [ext(appleUrl(d, 'd'), 'Maps', 'dk2'), ext(googleUrl(d, 'd'), 'Google', 'cr')];
   return h`
     ${book ? h`<a class="btn alt tr-wide" href="${web(book.url)}" target="_blank" rel="noopener">${icon('ticket')}${str(book.label) || 'Book'}${icon('arrow-up-right')}</a>` : ''}
-    <div class="sec"><p class="ey">Open in</p><div class="wrap tr-links">${chips}
-      ${dir === 'hotel' && ho && ho.address ? h`<button class="chip ghost tr-chip" data-act="copy" data-copy="${ho.address}">${icon('copy')}Copy address</button>` : ''}
-    </div></div>`;
+    <div class="sec"><p class="ey">Open in</p>
+      ${priv ? copyRow(ho) : ''}
+      <div class="tr-links${chips.length === 3 ? ' n3' : ''}${priv ? ' tr-after' : ''}">${chips}
+        ${dir === 'hotel' && ho && ho.address && !priv ? h`<button class="chip ghost tr-chip tr-span" data-act="copy" data-copy="${ho.address}">${icon('copy')}Copy address</button>` : ''}
+      </div>
+      ${priv ? h`<p class="tr-note">${PRIVATE_NOTE}</p>` : ''}
+    </div>`;
 }
-function routeMapCard(dir, R) {
+function upOnly(r) {
+  return /uptown only|not a midtown route/i.test(str(r && r.name) + ' ' + str(r && r.summary));
+}
+function routeMapCard(dir, R, r) {
   const ho = R.c.ho;
-  const note = !ho ? 'No hotel saved: the second pin is Midtown, where the guide’s times end.'
+  const ends = upOnly(r) ? `for reference; this route ${dir === 'lga' ? 'starts' : 'ends'} uptown, not in Midtown.`
+    : `where the guide’s times ${dir === 'lga' ? 'start' : 'end'}.`;
+  const base = !ho ? `No hotel saved: the second pin is Midtown, ${ends}`
+    : !ho.ll && !ho.address ? `No hotel address saved: the second pin is Midtown, ${ends}`
     : !ho.ll ? 'Your hotel’s address couldn’t be placed on the map, so the second pin is Midtown.'
     : !ho.ll.exact ? 'Hotel pin placed from the street address; it can be off by a block.' : '';
+  // With a hotel pinned, an uptown-only line still has to say it doesn't reach the hotel's door.
+  const note = ho && ho.ll && upOnly(r)
+    ? `${base ? base + ' ' : ''}This route ${dir === 'lga' ? 'starts' : 'ends'} uptown, not at the hotel pin.` : base;
   return h`<div class="sec"><p class="ey">Map</p>
-    <div class="tr-mapc">
-      <div class="tr-map" data-tr="map" role="img" aria-label="${`Map of LGA Terminal B and ${ho && ho.ll ? ho.name : 'Midtown'}`}"><span class="tr-mapph">${icon('map')}Loading map…</span></div>
-      ${mapControls()}
-    </div>
+    ${mapCard(h`<div class="tr-map" data-tr="map" role="img" aria-label="${`Map of LGA Terminal B and ${ho && ho.ll ? ho.name : 'Midtown'}`}"><span class="tr-mapph">${icon('map')}Loading map…</span></div>`, 'Open the map')}
     <div class="tr-mapbar">
       <button class="chip cr tr-chip" data-act="trLocate">${icon('current-location')}<span class="tr-locl">Show where I am</span></button>
-      ${ho && ho.ll ? h`<span class="tr-leg">${icon('plane')}LGA ${icon('bed')}Hotel</span>` : ''}
+      <span class="tr-leg">${icon('plane')}LGA ${ho && ho.ll ? h`${icon('bed')}Hotel` : h`${icon('building-skyscraper')}Midtown`}</span>
     </div>
     ${note ? h`<p class="tr-note">${note}</p>` : ''}
   </div>`;
@@ -836,18 +1148,19 @@ function routeRender(ctx) {
   const {dir, r} = f;
   const R = rank(dir);
   const name = str(r.name);
-  const ey = dir === 'lga' ? `${R.c.ho ? R.c.ho.name : 'Midtown'} → LGA Terminal B` : `LGA Terminal B → ${R.c.ho ? R.c.ho.name : 'Midtown'}`;
+  const end = upOnly(r) ? 'Uptown' : R.c.ho ? R.c.ho.name : 'Midtown';
+  const ey = dir === 'lga' ? `${end} → LGA Terminal B` : `LGA Terminal B → ${end}`;
   return {
     // No illustration here: the summary runs full width and would sit on top of it.
     hero: h`<div class="tr-hero">
-      <p class="ey ell tr-ey">${ey}</p>
+      <p class="ey tr-ey">${ey}</p>
       <div class="tr-rh"><span class="tr-rhi">${icon(routeIcon(r))}</span><h1 class="tr-rname" style="${`font-size:${nameSize(name)}px`}">${name}</h1></div>
-      ${linesIn(r).length ? h`<div class="tr-lines tr-hl">${linesIn(r).map(bullet)}</div>` : ''}
+      ${tagStrip(r, ' tr-hl')}
       ${str(r.summary) ? h`<p class="tr-lede">${str(r.summary)}</p>` : ''}
     </div>`,
     body: h`<div class="tr-body">
       <div data-tr="top">${safe(() => routeTop(dir, r, R), 'route top')}</div>
-      ${routeMapCard(dir, R)}
+      ${routeMapCard(dir, R, r)}
       <div data-tr="bot">${safe(() => routeBottom(dir, r, R), 'route bottom')}</div>
     </div>`,
     dir, r, R,
@@ -865,27 +1178,27 @@ function startRouteMap(ctx, view) {
   const box = N.$('[data-tr="map"]', view);
   if (!f || !box) return;
   const ho = hotelInfo();
-  const st = live.route = {dead: false, map: null, L: null, me: null, sig: mapSig(ho) + f.dir + f.r.id};
+  const tgt = ho && ho.ll ? {lat: ho.ll.lat, lon: ho.ll.lon} : MIDTOWN;
+  const st = live.route = {dead: false, map: null, L: null, me: null, sig: mapSig(ho) + f.dir + f.r.id,
+    label: `Map of LGA Terminal B and ${ho && ho.ll ? ho.name : 'Midtown'}`, maxZoom: 15,
+    pts: () => [[LGA.lat, LGA.lon], [tgt.lat, tgt.lon]],
+    // Two landmarks, neither tappable. No line between them: it would read as the road route.
+    pins(L, map) {
+      L.marker([LGA.lat, LGA.lon], {interactive: false, keyboard: false, icon: pinIcon(L, 'lga', String(icon('plane')))}).addTo(map);
+      L.marker([tgt.lat, tgt.lon], {interactive: false, keyboard: false, zIndexOffset: 1000,
+        icon: pinIcon(L, ho && ho.ll ? 'ho' : 'mid', String(icon(ho && ho.ll ? 'bed' : 'building-skyscraper')))}).addTo(map);
+    }};
   const alive = () => !st.dead;
   st.timer = setTimeout(() => {
     baseMap(box, alive).then(res => {
       if (!res) return;
       const {L, map} = res;
       st.L = L; st.map = map;
-      const tgt = ho && ho.ll ? {lat: ho.ll.lat, lon: ho.ll.lon} : MIDTOWN;
-      st.fit = (withMe) => {
-        const pts = [[LGA.lat, LGA.lon], [tgt.lat, tgt.lon]];
-        if (withMe && st.me) pts.push([st.me.getLatLng().lat, st.me.getLatLng().lng]);
-        map.fitBounds(L.latLngBounds(pts), {paddingTopLeft: [36, 64], paddingBottomRight: [76, 40], maxZoom: 15, animate: false});
-      };
+      st.fit = withMe => fitMap(st, PAD, withMe);
       st.fit(false);
       addBase(L, map, box, alive);
       box.classList.add('tr-ready');
-      L.marker([LGA.lat, LGA.lon], {interactive: false, keyboard: false, icon: pinIcon(L, 'lga', String(icon('plane')))}).addTo(map);
-      L.marker([tgt.lat, tgt.lon], {interactive: false, keyboard: false,
-        icon: pinIcon(L, ho && ho.ll ? 'ho' : 'mid', String(icon(ho && ho.ll ? 'bed' : 'building-skyscraper')))}).addTo(map);
-      // dashed line: direction only, not the road route
-      L.polyline([[LGA.lat, LGA.lon], [tgt.lat, tgt.lon]], {color: tok(box, '--tr-line'), weight: 2.5, dashArray: '2 7', lineCap: 'round', interactive: false}).addTo(map);
+      st.pins(L, map, false);
       if (N.whereOk()) N.where().then(w => { if (w) showMe(st, w, false); }).catch(() => {});
     }).catch(() => { if (!st.dead && box.isConnected) { box.classList.add('tr-nomap'); box.innerHTML = String(h`<span class="tr-mapph">${icon('map')}The map didn’t load. Directions links still work.</span>`); } });
   }, 300);
@@ -903,8 +1216,9 @@ N.screen('route', {
   },
   mount(ctx, view) {
     startRouteMap(ctx, view);
+    clampAlerts(view);
     const unwatch = watchScheme();
-    return () => { unwatch(); stopLive('route'); };
+    return () => { unwatch(); closeFull(true); stopLive('route'); };
   },
   // Data refreshes keep the map: only the text around it is redrawn.
   update(ctx) {
@@ -918,16 +1232,16 @@ N.screen('route', {
       hero.innerHTML = String(out.hero);
       body.innerHTML = String(out.body);
       startRouteMap(ctx, view);
+      clampAlerts(body);
       return;
     }
     hero.innerHTML = String(out.hero);
     N.$('[data-tr="top"]', body).innerHTML = String(safe(() => routeTop(out.dir, out.r, out.R), 'route top'));
     N.$('[data-tr="bot"]', body).innerHTML = String(safe(() => routeBottom(out.dir, out.r, out.R), 'route bottom'));
+    N.$$('.rise', body).forEach(e => e.classList.remove('rise'));   // a refresh shouldn't replay the entrance
+    clampAlerts(body);
   },
-  actions: {
-    trLocate: el => locate(el),
-    trZoom: (el, ev, ctx, arg) => zoomBy(+arg || 1),
-  },
+  actions: {...mapActs, ...alertActs},
 });
 
 // ---------- #hotel ----------
@@ -956,9 +1270,12 @@ function stayDates(ho) {
   const ok = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
   const nights = ok(a) && ok(b) ? Math.round((T(b + 'T12:00:00Z') - T(a + 'T12:00:00Z')) / 86400000) : null;
   const tm = s => { const m = /T(\d{2}):(\d{2})/.exec(s || ''); return m ? N.clockText(+m[1] * 60 + +m[2]) : ''; };
-  return {a: ok(a) ? N.date(a + 'T16:00:00Z', 'NYC') : null, b: ok(b) ? N.date(b + 'T16:00:00Z', 'NYC') : null, nights,
+  return {a: ok(a) ? N.date(a + 'T16:00:00Z', 'NYC') : null, b: ok(b) ? N.date(b + 'T16:00:00Z', 'NYC') : null, bYmd: ok(b) ? b : '', nights,
     ta: tm(ho.checkin), tb: tm(ho.checkout)};
 }
+const tripLk = d => d === 'lga'
+  ? h`<a class="tr-lk tr-lkc" href="#transit" data-act="trGo" data-arg="lga">${icon('plane-departure')}<span class="grow">From the hotel to LGA</span>${icon('chevron-right')}</a>`
+  : h`<a class="tr-lk tr-lkc" href="#transit" data-act="trGo" data-arg="hotel">${icon('plane-arrival')}<span class="grow">From LGA to the hotel</span>${icon('chevron-right')}</a>`;
 const telOf = phone => {
   const d = String(phone || '').replace(/[^\d+]/g, '');
   if (d.replace(/\D/g, '').length < 7) return null;
@@ -966,13 +1283,12 @@ const telOf = phone => {
 };
 function hotelEmpty() {
   return {
-    hero: h`<div class="tr-hero"><p class="ey">Hotel</p><h1 class="dp tr-dp">No hotel yet</h1></div>`,
+    hero: h`<div class="tr-hero"><p class="ey">Hotel</p><h1 class="dp tr-dp tr-he">Your hotel</h1></div>`,
     body: h`<div class="tr-body">
       <div class="card tr-empty">
         <span class="ic">${icon('bed')}</span>
-        <b>Add your hotel in Wallet</b>
-        <p>Name, address and confirmation number stay on this phone. With an address, this page shows the hotel on a map, directions, and the closest places from the food list.</p>
-        <a class="btn tr-wide" href="#wallet">${icon('wallet')}Open Wallet</a>
+        <p>Add it for directions, a map and food nearby.</p>
+        <a class="btn tr-wide" href="#wallet/hotel">${icon('plus')}Add your hotel</a>
       </div>
       <a class="tr-lk tr-lkc" href="#transit">${icon('route')}<span class="grow">Getting into town from LGA</span>${icon('chevron-right')}</a>
     </div>`,
@@ -987,8 +1303,14 @@ function hotelRender() {
   const ll = ho.ll;
   const near = ll ? nearest(ll) : [];
   const code = str(w.hotel_code);
-  const dest = ho.address || (ll && ll.exact ? {lat: ll.lat, lon: ll.lon} : null);
+  // A trip hotel can go into a directions link; a Wallet one never does (see destFor).
+  const priv = ho.local && !!ho.address;
+  const dest = ho.local ? null : ho.address || (ll && ll.exact ? {lat: ll.lat, lon: ll.lon} : null);
   const sz = Math.max(30, Math.min(56, ho.name.length <= 10 ? 56 : ho.name.length <= 16 ? 44 : ho.name.length <= 24 ? 36 : 30));
+  // Check-out day (or the return flight's day, when the hotel has no dates).
+  const today = N.ymd(N.now(), 'NYC'), rl = retLeg();
+  const outDay = dates.bYmd ? dates.bYmd === today : !!(rl && str(rl.date) === today);
+  const trips = h`<div class="stack8 tr-trips">${outDay ? [tripLk('lga'), tripLk('hotel')] : [tripLk('hotel'), tripLk('lga')]}</div>`;
   return {
     hero: h`<div class="tr-hero">
       <p class="ey">${ho.local ? 'Your hotel · saved in Wallet' : 'Your hotel'}</p>
@@ -997,9 +1319,10 @@ function hotelRender() {
         : h`<p class="tr-hsub">No address saved. Add it in Wallet for directions and a map.</p>`}
     </div>`,
     body: h`<div class="tr-body">
+      <div data-tr="htop">
       ${dates.a || dates.b ? h`<div class="tr-tiles">
         <div class="tile"><small>Check-in</small><b>${dates.a || '—'}</b>${dates.ta ? h`<span>from ${dates.ta}</span>` : ''}</div>
-        <div class="tile"><small>Check-out</small><b>${dates.b || '—'}</b><span>${[dates.tb ? `by ${dates.tb}` : '', dates.nights ? N.plural(dates.nights, 'night') : ''].filter(Boolean).join(' · ')}</span></div>
+        <div class="tile"><small>Check-out</small><b>${outDay ? 'Today' : dates.b || '—'}</b><span>${[dates.tb ? `by ${dates.tb}` : '', dates.nights ? N.plural(dates.nights, 'night') : ''].filter(Boolean).join(' · ')}</span></div>
       </div>` : ''}
       ${tel ? h`<a class="tr-lk tr-lkc" href="${tel}">${icon('phone')}<span class="grow">Call the hotel<small>${ho.phone}</small></span>${icon('chevron-right')}</a>` : ''}
       ${code ? h`<div class="card tight tr-conf">
@@ -1008,68 +1331,97 @@ function hotelRender() {
           <button class="tr-ib" data-act="trReveal" aria-pressed="${String(codeShown)}" aria-label="${codeShown ? 'Hide confirmation' : 'Show confirmation'}">${icon(codeShown ? 'eye-off' : 'eye')}</button>
           <button class="tr-ib" data-act="trCopyCode" aria-label="Copy confirmation">${icon('copy')}</button></div>
         <small class="tr-cn">${icon('lock')}Stored only on this phone.</small>
-      </div>` : h`<a class="tr-lk tr-lkc" href="#wallet">${icon('receipt')}<span class="grow">No hotel confirmation saved<small>Add it in Wallet; it stays on this phone</small></span>${icon('chevron-right')}</a>`}
+      </div>` : h`<a class="tr-lk tr-lkc" href="#wallet/hotel">${icon('receipt')}<span class="grow">No hotel confirmation saved<small>Add it in Wallet; it stays on this phone</small></span>${icon('chevron-right')}</a>`}
+      ${outDay ? trips : ''}
       ${dest ? h`<div class="sec"><p class="ey">Directions to the hotel</p>
         <div class="tr-dirs">
           <a class="tr-db" href="${appleUrl(dest, 'w')}" target="_blank" rel="noopener">${icon('walk')}Walk</a>
           <a class="tr-db" href="${appleUrl(dest, 'r')}" target="_blank" rel="noopener">${icon('train')}Transit</a>
           <a class="tr-db" href="${appleUrl(dest, 'd')}" target="_blank" rel="noopener">${icon('car')}Drive</a>
-        </div></div>` : ''}
-      <div class="stack8 tr-trips">
-        <a class="tr-lk tr-lkc" href="#transit" data-act="trGo" data-arg="hotel">${icon('plane-arrival')}<span class="grow">From LGA to the hotel</span>${icon('chevron-right')}</a>
-        <a class="tr-lk tr-lkc" href="#transit" data-act="trGo" data-arg="lga">${icon('plane-departure')}<span class="grow">From the hotel to LGA</span>${icon('chevron-right')}</a>
+        </div>
+        <p class="tr-note">Directions start from where you are now.</p></div>` : priv ? h`<div class="sec"><p class="ey">Directions to the hotel</p>
+        ${copyRow(ho)}
+        <div class="tr-links tr-after">${ext(appleUrl(null, 'r'), 'Maps', 'dk2')}${ext(googleUrl(null, 'r'), 'Google', 'cr')}</div>
+        <p class="tr-note">${PRIVATE_NOTE}</p></div>` : ''}
+      ${outDay ? '' : trips}
       </div>
       ${ll ? h`<div class="sec"><p class="ey">Close by to eat</p>
-        <div class="tr-mapc">
-          <div class="tr-map tr-hmap" data-tr="hmap" role="img" aria-label="Map of the hotel and nearby places to eat"><span class="tr-mapph">${icon('map')}Loading map…</span></div>
-          ${mapControls()}
-        </div>
+        ${mapCard(h`<div class="tr-map tr-hmap" data-tr="hmap" role="img" aria-label="Map of the hotel and nearby places to eat"><span class="tr-mapph">${icon('map')}Loading map…</span></div>`, 'Open the map')}
         ${!ll.exact ? h`<p class="tr-note">Hotel pin placed from the street address; it can be off by a block. Walking times are from that pin.</p>` : ''}
-        ${near.length ? h`<div class="tr-places">${near.map(placeRow)}</div>`
-          : h`<div class="co plain">${icon('info-circle')}<span>The food list isn’t on this phone yet.</span></div>`}
-      </div>` : h`<div class="sec"><div class="co plain">${icon('map-pin')}<span>${ho.address ? 'This address couldn’t be placed on the map (it works for Manhattan street addresses between 14th and 125th St). Directions links still work.' : 'Add the hotel address in Wallet to see it on a map with places nearby.'}</span></div>
+        <div data-tr="hnear">${near.length ? h`<div class="tr-places">${near.map(placeRow)}</div>`
+          : h`<div class="co plain tr-nofood">${icon('info-circle')}<span>The food list isn’t on this phone yet.</span></div>`}</div>
+      </div>` : h`<div class="sec tr-gap">${ho.address ? h`<div class="co plain">${icon('map-pin')}<span>This address couldn’t be placed on the map (it works for Manhattan street addresses between 14th and 125th St).${priv ? '' : ' Directions links still work.'}</span></div>`
+          : h`<a class="tr-lk tr-lkc" href="#wallet/hotel">${icon('map-pin')}<span class="grow">Add the hotel address<small>In Wallet, for a map with places to eat nearby</small></span>${icon('chevron-right')}</a>`}
         <a class="tr-lk tr-lkc" href="#food">${icon('tools-kitchen-2')}<span class="grow">Browse the food list</span>${icon('chevron-right')}</a></div>`}
     </div>`,
   };
+}
+// The hotel map shows the hotel and its nearest places: either changing redraws it.
+const hotelMapSig = ho => ho && ho.ll ? mapSig(ho) + '|' + nearest(ho.ll).map(x => x.p.id).join(',') : '';
+// Opening hours of the listed places, to notice when "Open until 11p" goes stale.
+const hoursSig = () => {
+  const ho = hotelInfo();
+  return ho && ho.ll ? nearest(ho.ll).map(x => { const r = safe(() => N.food.hours(x.p, N.now()), 'hours', null) || {}; return `${r.short || r.text || ''}/${r.state || ''}`; }).join('|') : '';
+};
+let lastHours = '';
+// Redraws the words on #hotel and keeps the map. False when the page has to be rebuilt.
+function softHotel(out) {
+  const body = N.$('#body'), hero = N.$('#hero');
+  if (!body || !hero) return false;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = String(out.body);
+  const parts = ['htop', 'hnear'].map(k => [N.$(`[data-tr="${k}"]`, body), N.$(`[data-tr="${k}"]`, tmp)]);
+  if (parts.some(([a, b]) => !a || !b)) return false;
+  hero.innerHTML = String(out.hero);
+  parts.forEach(([a, b]) => { a.innerHTML = b.innerHTML; N.$$('.rise', a).forEach(e => e.classList.remove('rise')); });
+  return true;
 }
 function startHotelMap(view) {
   stopLive('hotel');
   const ho = hotelInfo();
   const box = N.$('[data-tr="hmap"]', view);
   if (!ho || !ho.ll || !box) return;
-  const st = live.hotel = {dead: false, map: null, L: null, me: null, sig: mapSig(ho)};
-  const alive = () => !st.dead;
   const near = nearest(ho.ll);
+  const st = live.hotel = {dead: false, map: null, L: null, me: null, sig: hotelMapSig(ho),
+    label: 'Map of the hotel and nearby places to eat', maxZoom: 17,
+    pts: () => [[ho.ll.lat, ho.ll.lon], ...near.map(x => [x.p.lat, x.p.lon])],
+    // Numbered pins match the list below. On the page they are a picture, spread apart so each number
+    // reads; on the full map they sit at the real spot with a 44px target that opens the place.
+    pins(L, map, isFull) {
+      const sz = isFull ? 44 : 28;
+      const mks = near.map((x, i) => {
+        const mk = L.marker([x.p.lat, x.p.lon], {interactive: isFull, keyboard: false, title: isFull ? str(x.p.name) : '', zIndexOffset: -i * 100,
+          icon: L.divIcon({className: 'tr-pinw tr-fhit', html: `<span class="tr-fpin">${i + 1}</span>`, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2]})}).addTo(map);
+        if (isFull) mk.on('click', () => shutFull(() => N.go('place/' + x.p.id)));
+        return {mk, ll: L.latLng(x.p.lat, x.p.lon)};
+      });
+      // The hotel is the landmark everything is measured from, so it draws on top; it takes no taps.
+      L.marker([ho.ll.lat, ho.ll.lon], {interactive: false, keyboard: false, zIndexOffset: 1000, icon: pinIcon(L, 'ho', String(icon('bed')))}).addTo(map);
+      if (!isFull) { st.spread = () => spread(map, mks, L.latLng(ho.ll.lat, ho.ll.lon)); st.spread(); }
+    }};
+  const alive = () => !st.dead;
   st.timer = setTimeout(() => {
     baseMap(box, alive).then(res => {
       if (!res) return;
       const {L, map} = res;
       st.L = L; st.map = map;
-      st.fit = (withMe) => {
-        const pts = [[ho.ll.lat, ho.ll.lon], ...near.map(x => [x.p.lat, x.p.lon])];
-        if (withMe && st.me) pts.push([st.me.getLatLng().lat, st.me.getLatLng().lng]);
-        map.fitBounds(L.latLngBounds(pts), {paddingTopLeft: [30, 56], paddingBottomRight: [72, 36], maxZoom: 17, animate: false});
-      };
+      st.fit = withMe => { fitMap(st, PAD, withMe); if (st.spread) st.spread(); };
       st.fit(false);
       addBase(L, map, box, alive);
       box.classList.add('tr-ready');
-      near.forEach((x, i) => {
-        const mk = L.marker([x.p.lat, x.p.lon], {keyboard: false, title: str(x.p.name), riseOnHover: true,
-          icon: L.divIcon({className: 'tr-pinw', html: `<span class="tr-fpin">${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14]})}).addTo(map);
-        mk.on('click', () => N.go('place/' + x.p.id));
-      });
-      L.marker([ho.ll.lat, ho.ll.lon], {interactive: false, keyboard: false, zIndexOffset: 400, icon: pinIcon(L, 'ho', String(icon('bed')))}).addTo(map);
+      st.pins(L, map, false);
       if (N.whereOk()) N.where().then(w => { if (w) showMe(st, w, false); }).catch(() => {});
     }).catch(() => { if (!st.dead && box.isConnected) { box.classList.add('tr-nomap'); box.innerHTML = String(h`<span class="tr-mapph">${icon('map')}The map didn’t load. The list below still works.</span>`); } });
   }, 300);
 }
 
 N.screen('hotel', {
+  nav: 3,
   back: 'transit',
   tone: 'band',
   uses: ['trip', 'food', 'force'],
   title: 'Hotel',
-  render() { return safe(hotelRender, 'hotel', null) || hotelEmpty(); },
+  render() { lastHours = safe(hoursSig, 'hours sig', ''); return safe(hotelRender, 'hotel', null) || hotelEmpty(); },
   mount(ctx, view) {
     codeShown = false;
     // a fresh render after mount resets the reveal; the code is masked again on entry
@@ -1077,19 +1429,29 @@ N.screen('hotel', {
     const b = N.$('[data-act="trReveal"]', view); if (b) { b.setAttribute('aria-pressed', 'false'); b.innerHTML = String(icon('eye')); b.setAttribute('aria-label', 'Show confirmation'); }
     startHotelMap(view);
     const unwatch = watchScheme();
-    return () => { unwatch(); stopLive('hotel'); codeShown = false; };
+    return () => { unwatch(); closeFull(true); stopLive('hotel'); codeShown = false; };
   },
+  // Same hotel, places and theme: only the words are redrawn and the map stays.
   update(ctx, why) {
     const view = N.$('#view'), st = live.hotel, ho = hotelInfo();
+    lastHours = safe(hoursSig, 'hours sig', '');
     const out = safe(hotelRender, 'hotel', null) || hotelEmpty();
-    const keepMap = st && st.sig === mapSig(ho) && N.$('[data-tr="hmap"]', view);
-    if (keepMap && why !== 'wallet') return;   // trip/food refresh or theme kept: nothing else here changes
+    const keepMap = st && !st.dead && st.sig === hotelMapSig(ho) && N.$('[data-tr="hmap"]', view);
+    if (keepMap && softHotel(out)) return;
     const shown = codeShown;
     stopLive('hotel');
     N.$('#hero').innerHTML = String(out.hero);
     N.$('#body').innerHTML = String(out.body);
     codeShown = shown;
     startHotelMap(view);
+  },
+  // Places open and close while the page is open: refresh their hours.
+  tick() {
+    const s = safe(hoursSig, 'hours sig', '');
+    if (s === lastHours) return;
+    lastHours = s;
+    const out = safe(hotelRender, 'hotel', null);
+    if (out) softHotel(out);
   },
   actions: {
     trReveal(el) {
@@ -1106,9 +1468,8 @@ N.screen('hotel', {
       try { await navigator.clipboard.writeText(code); N.toast('Confirmation copied'); }
       catch { N.toast('Couldn’t copy'); }
     },
-    trGo(el, ev, ctx, arg) { if (DIRS[arg]) chosen = arg; N.go('transit'); },
-    trLocate: el => locate(el),
-    trZoom: (el, ev, ctx, arg) => zoomBy(+arg || 1),
+    trGo(el, ev, ctx, arg) { if (DIRS[arg]) choose(arg); N.go('transit'); },
+    ...mapActs,
   },
 });
 })();

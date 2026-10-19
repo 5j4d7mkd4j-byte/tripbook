@@ -4,11 +4,15 @@
 /* ---------- hero ---------- */
 .tr-hero{position:relative;padding-top:2px}
 .tr-hero>*{position:relative}
-.tr-hero>.tr-bridge{position:absolute}
-.tr-bridge{right:-20px;bottom:-30px;width:200px;height:136px}
-.tr-ey{max-width:100%}
+.tr-hero>.tr-bridge{position:absolute;z-index:0}
+/* The bridge sits in the band to the right of the direction pills, clear of the title and its
+   subline, with its piers running under the sheet. Only the bottom 40% of the drawing has ink,
+   so the box's empty top may overlap the subline. */
+.tr-bridge{right:-20px;bottom:-30px;width:46%;height:auto;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 30%);mask-image:linear-gradient(90deg,transparent 0,#000 30%)}
+.tr-hero>[data-tr="head"],.tr-hero>.tr-ps{z-index:1}
+.tr-ey{max-width:100%;line-height:1.35;overflow-wrap:anywhere}
 .tr-dp{font-size:56px;margin:10px 0 0;color:var(--ob);overflow-wrap:anywhere}
-.tr-hsub{margin:12px 0 0;font-size:14px;font-weight:600;line-height:1.35;color:var(--ob);max-width:300px}
+.tr-hsub{margin:12px 0 0;font-size:14px;font-weight:600;line-height:1.35;color:var(--obm);max-width:300px}
 .tr-ps{margin-top:18px;border-radius:24px}
 .tr-ps button{height:44px;padding:0 18px;border-radius:20px}
 
@@ -16,14 +20,16 @@
 .tr-rh{display:flex;align-items:center;gap:12px;margin-top:12px;max-width:calc(100% - 40px)}
 .tr-rhi{width:48px;height:48px;border-radius:16px;background:var(--onband);color:var(--ob);display:flex;align-items:center;justify-content:center;font-size:24px;flex:none}
 .tr-rname{margin:0;min-width:0;font-family:"Inter Tight",Inter,system-ui,sans-serif;font-weight:900;line-height:1;letter-spacing:-.02em;color:var(--ob);overflow-wrap:anywhere}
-.tr-lede{margin:12px 0 0;font-size:14px;line-height:1.45;color:var(--ob);max-width:330px}
+.tr-lede{margin:12px 0 0;font-size:14px;font-weight:500;line-height:1.45;color:var(--obm);max-width:330px}
 .tr-hl{margin-top:12px}
-.tr-hl .tr-mta{background:var(--sheet);color:var(--ink)}
+.tr-hl .tr-mta,.tr-hl .tr-rtag{background:var(--sheet);color:var(--ink)}
+.tr-hl .tr-b{box-shadow:0 0 0 2px var(--sheet)}
+.tr-hl.tr-lines{gap:6px}
 
 /* hotel hero */
 .tr-hn{line-height:.9;letter-spacing:-.02em}
 .tr-addr{display:flex;align-items:center;gap:10px;margin-top:14px}
-.tr-addr p{margin:0;flex:1;min-width:0;font-size:15px;font-weight:600;line-height:1.35;color:var(--ob)}
+.tr-addr p{margin:0;flex:1;min-width:0;font-size:15px;font-weight:600;line-height:1.35;color:var(--obm)}
 .tr-ib{width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;flex:none;background:var(--sheet);color:var(--ink)}
 .tr-addr .tr-ib{background:var(--onband);color:var(--ob)}
 
@@ -32,14 +38,15 @@
 .tr-body>.sec,.tr-body>[data-tr]>.sec{margin-top:22px}
 .tr-body>[data-tr]>*{margin-top:12px}
 .tr-body>[data-tr]>.sec{margin-top:22px}
-.tr-body>[data-tr="top"]>:first-child{margin-top:0}
+.tr-body>[data-tr="top"]>:first-child,.tr-body>[data-tr="htop"]>:first-child{margin-top:0}
 .tr-body>[data-tr="bot"]>:first-child{margin-top:22px}
 .tr-note{margin:10px 2px 0;font-size:13px;line-height:1.4;color:var(--mu)}
 .tr-wide{display:flex;width:100%;text-decoration:none}
 
 /* hotel pill */
-.tr-pill{display:flex;align-items:center;gap:12px;min-height:60px;padding:8px 14px 8px 8px;border-radius:22px;background:var(--cr);text-decoration:none;color:var(--ink)}
-.tr-pin-ic{width:44px;height:44px;border-radius:50%;background:var(--sheet);color:var(--eb);display:flex;align-items:center;justify-content:center;font-size:20px;flex:none}
+/* The hotel row and the traffic card under it share padding, radius and a 40px icon tile. */
+.tr-pill{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 14px 12px 12px;border-radius:20px;background:var(--cr);text-decoration:none;color:var(--ink)}
+.tr-pin-ic{width:40px;height:40px;border-radius:13px;background:var(--sheet);color:var(--eb);display:flex;align-items:center;justify-content:center;font-size:20px;flex:none}
 .tr-pill b{display:block;font-size:15px;font-weight:800}
 .tr-pill small{display:block;font-size:13px;color:var(--mu);margin-top:1px}
 .tr-chev{font-size:18px;color:var(--mu)}
@@ -53,6 +60,9 @@
 .tr-lp{margin:8px 0 0;font-size:13px;line-height:1.45}
 
 /* traffic and weather */
+/* 1.5px border + 10.5px = the hotel row's 12px, so the icons and text line up */
+.tr-body .tr-traffic{padding:10.5px 12.5px 10.5px 10.5px;border-radius:20px}
+.tr-traffic .ic{background:var(--cr)}
 .tr-traffic .rw b{font-size:16px}
 .tr-traffic .tr-foot{margin-top:4px}
 .tr-wx,.tr-wxa{display:flex;gap:10px;align-items:flex-start;margin:12px 0 0;padding-top:12px;border-top:1.5px solid var(--ln);font-size:13px;font-weight:600;line-height:1.4}
@@ -61,20 +71,25 @@
 .tr-wxa .i{color:var(--rot)}
 
 /* options */
-.tr-op{display:flex;align-items:flex-start;gap:12px;min-height:64px;padding:12px 14px 12px 12px;text-decoration:none;color:var(--ink)}
-.tr-op.best{box-shadow:inset 0 0 0 2px var(--ro)}
+/* icon | name and details | minutes | chevron; the best pick's note runs under the last three */
+.tr-op{display:grid;grid-template-columns:40px minmax(0,1fr) auto auto;column-gap:12px;align-items:start;min-height:64px;padding:12px 10px 12px 12px;text-decoration:none;color:var(--ink)}
+.tr-op.best{box-shadow:inset 0 0 0 2px var(--ink)}
 .tr-op .ic{background:var(--sheet)}
-.tr-opm{display:block;padding-top:1px}
+.tr-op>.tr-chev{align-self:center;margin-left:-4px}
+.tr-opm{display:block;min-width:0;padding-top:1px}
 .tr-opn{display:block}
 .tr-opn b{display:block;font-size:15px;font-weight:800;line-height:1.3}
 .tr-opm small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
 .tr-opm .tr-warn{display:flex;align-items:center;gap:5px;color:var(--rot);font-weight:600}
-.tr-best{display:block;margin-top:8px;font-size:13px;line-height:1.4}
-.tr-best b{display:inline-flex;align-items:center;gap:5px;color:var(--rot);font-weight:800}
+.tr-best{grid-column:2/-1;display:block;margin-top:10px}
+.tr-best b{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px 0 8px;border-radius:var(--r-pill);background:var(--ink);color:var(--page);font-size:12px;font-weight:800;white-space:nowrap}
+.tr-best b .i{font-size:14px}
+.tr-best>span{display:block;margin-top:6px;font-size:13px;line-height:1.4}
 .tr-opt{flex:none;text-align:right;padding-top:1px}
 .tr-opt b{display:block;font-family:"Inter Tight",Inter,system-ui,sans-serif;font-size:21px;font-weight:900;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
 .tr-opt small{display:block;font-size:13px;color:var(--mu)}
-.tr-lines{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.tr-lines{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px}
+.tr-lines .tr-b{font-size:14.5px;vertical-align:0;flex:none}
 .tr-mta{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--page);font-size:13px;font-weight:800;line-height:1;flex:none}
 .tr-rtag{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;background:var(--ink);color:var(--page);font-size:13px;font-weight:800;flex:none;white-space:nowrap}
 
@@ -82,12 +97,28 @@
 .tr-alerts{display:grid;gap:8px}
 .tr-sub{margin:14px 0 8px;color:var(--mu)}
 .tr-alert{display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-radius:18px;background:var(--cr)}
-.tr-alert p{margin:1px 0 0;font-size:14px;font-weight:600;line-height:1.38}
+.tr-alert .grow{min-width:0}
+/* three lines, then More */
+.tr-alert p{margin:1px 0 0;font-size:14px;font-weight:500;line-height:1.4;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.tr-alert.open p{display:block;-webkit-line-clamp:unset;overflow:visible}
 .tr-alert p .tr-mta{width:20px;height:20px;vertical-align:1px;margin:0 1px}
-.tr-alert small{display:block;font-size:13px;color:var(--mu);margin-top:3px}
+.tr-alert p .tr-b{font-size:13px;margin:0 1px}
+.tr-af{display:flex;align-items:center;gap:8px;margin-top:4px}
+.tr-alert small{display:block;font-size:13px;color:var(--mu)}
+.tr-more{display:none;align-items:center;height:44px;margin:-12px -14px -11px auto;padding:0 14px;border:0;background:none;color:var(--ink);font:inherit;font-size:13px;font-weight:700}
+.tr-alert.cut .tr-more,.tr-alert.open .tr-more{display:inline-flex}
 
 /* chips and link rows */
-.tr-links{gap:8px}
+/* two equal columns (three on a route with no ride apps) so every chip is a big target */
+.tr-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.tr-links.n3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tr-links .tr-chip{justify-content:center;min-width:0;max-width:none}
+.tr-links .tr-span{grid-column:1/-1}
+.tr-after{margin-top:8px}
+.tr-copy{width:100%}
+.tr-copy .grow{min-width:0}
+.tr-gap>*+*{margin-top:12px}
+.tr-nofood{margin-top:12px}
 .tr-chip{height:44px;padding:0 16px;border-radius:22px;font-size:14px}
 .tr-chip .i{font-size:16px}
 .tr-lk{display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 14px;border-radius:16px;background:var(--sheet);text-decoration:none;color:var(--ink);font-size:14px;font-weight:700}
@@ -124,8 +155,10 @@
 .tr-stm{flex:none;margin-top:10px;font-size:13px;font-weight:700;color:var(--mu);white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* ---------- maps ---------- */
+/* The map on the page is a picture: a swipe on it scrolls the page, a tap opens the full map. */
 .tr-mapc{position:relative;border-radius:22px;overflow:hidden;isolation:isolate}
-.tr-map{--tr-land:var(--cr);--tr-park:var(--ok);--tr-road:var(--tile);--tr-edge:var(--ln);--tr-line:var(--ro);
+.tr-mapc,.tr-mapc .tr-map{touch-action:pan-y}
+.tr-map{--tr-land:var(--cr);--tr-park:var(--ok);--tr-road:var(--tile);--tr-edge:var(--ln);
   position:relative;height:280px;background:var(--tile);z-index:0}
 .tr-hmap{height:300px}
 .tr-map.leaflet-container{background:var(--band);font-family:inherit}
@@ -133,11 +166,26 @@
 .tr-mapph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 20px;text-align:center;font-size:13px;font-weight:600;color:var(--mu)}
 .tr-mapph .i{font-size:18px}
 .tr-map.tr-ready .tr-mapph{display:none}
-.tr-mapc .tr-map .leaflet-control-attribution{margin:0;background:var(--sheet);color:var(--mu);font-size:13px;line-height:1.4;padding:1px 8px;border-radius:8px 0 0 0;opacity:.92}
-.tr-mapc .tr-map .leaflet-control-attribution a{color:inherit;text-decoration:none}
-.tr-zoom{position:absolute;z-index:500;right:10px;top:10px;display:grid;gap:6px}
+.tr-map.leaflet-container .leaflet-control-attribution{margin:0 0 8px 8px;padding:1px 6px;border-radius:6px;background:var(--sheet);color:var(--mu);font-size:10px;line-height:1.5;opacity:.9}
+.tr-map .leaflet-control-attribution a{color:inherit;text-decoration:none}
+.tr-mapa{position:absolute;inset:0;z-index:1;display:block;width:100%;padding:0;border:0;border-radius:inherit;background:none;color:var(--ink);-webkit-tap-highlight-color:transparent}
+.tr-mapa:active{scale:none;opacity:1}
+.tr-mapa:focus-visible{outline:none;box-shadow:inset 0 0 0 3px var(--ink)}
+.tr-mapx{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:14px;font-size:20px;
+  background:var(--sheet);color:var(--ink);box-shadow:0 2px 10px var(--gh);transition:scale .15s ease}
+.tr-mapa:active .tr-mapx{scale:.92}
+.tr-map.tr-nomap~.tr-mapa{display:none}
 .tr-zb{width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--sheet);color:var(--ink);box-shadow:0 2px 10px var(--gh)}
-.tr-map.tr-nomap~.tr-zoom{display:none}
+
+/* Full-screen map: takes every gesture, held to the area around the trip. */
+.tr-full{position:fixed;inset:0;z-index:15;background:var(--band);overscroll-behavior:contain}
+.tr-full-in{animation:tr-fade .2s ease both}
+@keyframes tr-fade{from{opacity:0}}
+.tr-full .tr-fmap{position:absolute;inset:0;height:auto;touch-action:none}
+.tr-full .tr-map.leaflet-container .leaflet-control-attribution{margin-left:calc(env(safe-area-inset-left) + 8px);margin-bottom:calc(env(safe-area-inset-bottom) + 8px)}
+.tr-fc{position:absolute;z-index:2;top:calc(env(safe-area-inset-top) + 12px);right:calc(env(safe-area-inset-right) + 12px);display:grid;gap:16px}
+.tr-fz{display:grid;gap:8px}
+@media (prefers-reduced-motion:reduce){.tr-full-in{animation:none}.tr-mapx{transition:none}}
 .tr-mapbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 12px;margin-top:10px}
 .tr-mapbar .tr-chip[aria-disabled="true"]{opacity:.6;pointer-events:none}
 .tr-leg{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--mu)}
@@ -145,11 +193,11 @@
 .tr-leg .i+.i,.tr-leg .i:not(:first-child){margin-left:6px}
 
 .tr-pinw{background:none;border:0}
+.tr-pinw.tr-fhit{display:flex;align-items:center;justify-content:center}
 .tr-mpin{--tr-pc:var(--ink);--tr-pt:var(--page);position:relative;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;
   background:var(--tr-pc);color:var(--tr-pt);font-size:18px;box-shadow:0 0 0 3px var(--sheet),0 4px 12px var(--gh)}
 .tr-mpin::after{content:"";position:absolute;left:50%;top:100%;margin:1px 0 0 -6px;border-style:solid;border-width:8px 6px 0;border-color:var(--tr-pc) transparent transparent}
-.tr-mpin.ho{--tr-pc:var(--ro);--tr-pt:var(--rog)}
-.tr-mpin.mid{--tr-pc:var(--eb);--tr-pt:var(--sheet)}
+.tr-mpin.ho,.tr-mpin.mid{--tr-pc:var(--eb);--tr-pt:var(--sheet)}
 .tr-me{display:block;width:18px;height:18px;margin:2px;border-radius:50%;background:var(--eb);box-shadow:0 0 0 3px var(--sheet),0 0 0 9px var(--ht)}
 .tr-fpin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:800;
   box-shadow:inset 0 0 0 2px var(--ink),0 3px 8px var(--gh)}
@@ -170,8 +218,9 @@
 .tr-place .tr-hrs.closing{color:var(--rot)}
 .tr-pd{flex:none;text-align:right}
 .tr-pd b{font-size:15px;white-space:nowrap}
-.tr-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:26px 20px}
+.tr-dp.tr-he{font-size:44px}
+.tr-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:24px 20px 20px}
 .tr-empty .ic{width:56px;height:56px;border-radius:18px;font-size:26px}
 .tr-empty b{font-size:18px;font-weight:800}
-.tr-empty p{margin:0;font-size:14px;line-height:1.45;color:var(--mu)}
-.tr-empty .btn{margin-top:6px}
+.tr-empty p{margin:0;font-size:15px;line-height:1.45;color:var(--ink)}
+.tr-empty .btn{margin-top:4px}

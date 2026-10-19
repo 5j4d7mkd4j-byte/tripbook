@@ -28,7 +28,7 @@ const safe = (fn, d) => { try { const v = fn(); return v == null ? d : v; } catc
 const legs = () => safe(() => N.legs(), []);
 const leave = dir => safe(() => N.leave(dir), null);
 const legName = l => `${l.flight || 'Flight'} · ${l.from || '?'} → ${l.to || '?'}`;
-const legDay = l => N.date(l.dep && l.dep.sched || (l.date ? l.date + 'T16:00:00Z' : null), l.from);
+const legDay = l => safe(() => N.date(l.dep && l.dep.sched || (l.date ? l.date + 'T16:00:00Z' : null), l.from), '—');
 const T = iso => iso ? new Date(iso).getTime() : NaN;
 
 // The clock the traveler is living on: Phoenix before and after the trip, New York during it.
@@ -41,17 +41,20 @@ function zone() {
   }
   return 'PHX';
 }
-// "4:12p" today, "4:12p Sun 18 Oct" on another day
+// "4:12p" today, "Sun 4:12p" this week, "Sun 18 Oct 4:12p" further off
 function when(iso, ap) {
   if (!iso) return '';
-  const same = N.ymd(iso, ap) === N.ymd(N.now(), ap);
-  return same ? N.time(iso, ap) : `${N.time(iso, ap)} ${N.date(iso, ap)}`;
+  if (N.ymd(iso, ap) === N.ymd(N.now(), ap)) return N.time(iso, ap);
+  const d = N.date(iso, ap);
+  return `${Math.abs(N.now() - new Date(iso)) < 6 * 864e5 ? d.split(' ')[0] : d} ${N.time(iso, ap)}`;
 }
 
-const hero = (ey, ic, big, lede, small) => h`<div class="wl-hero">
+// These are task screens (Wallet, Settings, Data, Calendar), so they get a compact header:
+// eyebrow and a 28px title, keeping the first control high on the screen.
+const bar = (ey, ic, title, sub, id) => h`<div class="wl-hero wl-hero-c">
   <div class="ey wl-ey">${icon(ic)}<span>${ey}</span></div>
-  <div class="dp wl-big${small ? ' wl-big-s' : ''}">${big}</div>
-  ${lede ? h`<p class="wl-lede">${lede}</p>` : ''}</div>`;
+  <h1 class="hl wl-hl"><b>${title}</b></h1>
+  ${sub ? h`<p class="wl-lede"${id ? R(` id="${id}"`) : ''}>${sub}</p>` : ''}</div>`;
 const sec = (id, title, inner, i, rise) => h`<section class="sec${rise ? ' rise' : ''}" style="animation-delay:${i * 45}ms"${title ? R(` aria-labelledby="${id}-t"`) : ''}>
   ${title ? h`<h2 class="ey wl-sh" id="${id}-t">${title}</h2>` : ''}<div id="${id}">${inner}</div></section>`;
 const fill = (id, fn) => {
@@ -109,7 +112,36 @@ const CODES = {
     add: 'Number from the hotel’s email, if you want it handy', hint: ''},
 };
 const MAX_PEOPLE = 9;
-const W = {d: null, raw: {seats: {}}, edit: {}, show: {}, err: {}, timers: {}, saveT: 0, savedT: 0, dirty: false, ask: false};
+
+// A wallet saved by an older build, or edited by hand, can hold the wrong
+// shapes: a seat that isn't in a list, a name that's a number. The itinerary
+// reads seats straight from storage and one bad shape stops every screen, so
+// mend the shapes once at load, before the first paint. Values are kept.
+(() => {
+  try {
+    const w = N.get('nyc.wallet', null);
+    if (!w || typeof w !== 'object' || Array.isArray(w)) return;
+    const txt = v => v == null || typeof v === 'object' ? '' : String(v);
+    const list = v => Array.isArray(v) ? v : v == null || typeof v === 'object' ? [] : [v];
+    const next = Object.assign({}, w);
+    if ('names' in w) next.names = list(w.names).map(txt);
+    if ('seats' in w) {
+      const seats = {};
+      if (w.seats && typeof w.seats === 'object' && !Array.isArray(w.seats)) {
+        for (const [k, a] of Object.entries(w.seats)) {
+          const b = list(a).map(txt);
+          if (b.some(Boolean)) seats[k] = b;
+        }
+      }
+      next.seats = seats;
+    }
+    if ('bags' in w) next.bags = N.clamp(Math.round(+w.bags) || 0, 0, 9);
+    ['aa_code', 'aa_code_ret', 'hotel_code', 'hotel_name', 'hotel_address', 'notes'].forEach(f => { if (f in w) next[f] = txt(w[f]); });
+    if (JSON.stringify(next) !== JSON.stringify(w)) N.set('nyc.wallet', next);
+  } catch (e) { /* storage blocked: N.wallet() falls back to an empty wallet */ }
+})();
+
+const W = {d: null, raw: {seats: {}}, edit: {}, show: {}, err: {}, timers: {}, saveT: 0, savedT: 0, dirty: false, ask: false, jump: ''};
 
 function initDraft() {
   const w = N.wallet();
@@ -179,20 +211,18 @@ function flush() {
   savedNote(ok);
   if (ok) syncBadge();
 }
-// The top bar's "Wallet is empty" dot. This screen is static, so the shell doesn't repaint it on save.
+// The top bar's "Wallet is empty" dot, if the shell still draws one. This screen is
+// static, so the shell doesn't repaint the bar on save: drop the dot once something is saved.
 function syncBadge() {
-  const av = N.$('.tb .av');
-  if (!av) return;
+  const dot = N.$('.tb .av .bdg');
+  if (!dot) return;
   const w = N.wallet();
-  const empty = !w.aa_code && !(w.names || []).length;
-  const dot = N.$('.bdg', av);
-  if (!empty && dot) dot.remove();
-  else if (empty && !dot) av.insertAdjacentHTML('beforeend', '<span class="bdg"></span>');
+  if (w.aa_code || (w.names || []).length) dot.remove();
 }
 function savedNote(ok) {
   const el = document.getElementById('wl-saved');
   if (!el) { if (!ok) N.toast('Couldn’t save: this phone’s storage is full or blocked'); return; }
-  el.innerHTML = String(ok ? h`${icon('check')}<span>Saved on this phone</span>` : h`${icon('alert-triangle')}<span>Couldn’t save: storage is full or blocked</span>`);
+  el.innerHTML = String(ok ? h`${icon('check')}<span>Saved</span>` : h`${icon('alert-triangle')}<span>Couldn’t save: storage is full or blocked</span>`);
   el.classList.toggle('bad', !ok);
   el.classList.add('on');
   clearTimeout(W.savedT);
@@ -321,7 +351,7 @@ function seatsHtml() {
   return h`${ls.map(l => {
     const err = Object.entries(W.err).filter(([k, v]) => v && k.startsWith(`seat:${l.id}:`)).map(([, v]) => v)[0] || '';
     return h`<div class="wl-leg">
-      <div class="wl-leg-h"><b>${legName(l)}</b><span>${legDay(l)}</span>${l.confirmed === false ? h`<span class="wl-tag">Not confirmed</span>` : ''}</div>
+      <div class="wl-leg-h"><b>${legName(l)}</b>${legDay(l) !== '—' ? h`<span>${legDay(l)}</span>` : ''}${l.confirmed === false ? h`<span class="wl-tag">Not confirmed</span>` : ''}</div>
       <div class="wl-seats">${Array.from({length: n}, (_, i) => {
         const raw = (W.raw.seats[l.id] || [])[i];
         const val = raw != null ? raw : ((W.d.seats[l.id] || [])[i] || '');
@@ -371,32 +401,58 @@ function notesHtml() {
     <div class="wl-info">${icon('info-circle')}<span>Don’t add passport, PreCheck or card numbers here.</span></div>`;
 }
 function clearHtml() {
-  if (!W.ask) {
-    return h`<button class="btn alt wl-wide" data-act="wclear">${icon('trash')}Clear Wallet on this phone</button>
-      <div class="wl-hint">Wallet is kept only on this phone, so there’s no backup to restore from.</div>`;
-  }
+  if (!W.ask) return h`<button class="btn alt wl-wide wl-clr" data-act="wclear">${icon('trash')}Clear Wallet</button>`;
   return h`<div class="wl-confirm" role="group" aria-labelledby="wl-cq">
     <b id="wl-cq">Clear everything in Wallet?</b>
-    <p>Codes, travelers, seats, bags, hotel details and notes are deleted from this phone. This can’t be undone.</p>
+    <p>Codes, travelers, seats, bags, hotel details and notes are deleted. There’s no backup, so this can’t be undone.</p>
     <div class="row"><button class="btn wl-cancel grow" data-act="wclear-no">Cancel</button>
       <button class="btn rose grow" data-act="wclear-yes">Clear Wallet</button></div></div>`;
 }
 
+// ---------- deep links: #wallet/hotel, #wallet/seats[/<leg id>], #wallet/clear ----------
+// Scroll the section under the top bar, flash it once and focus its first empty field.
+const DEEP = {hotel: 'wl-hotel', seats: 'wl-seats', clear: 'wl-clear'};
+function jumpField(box, kind, leg) {
+  if (kind === 'clear') return N.$('button', box);
+  const all = N.$$(kind === 'seats' ? 'input[data-f="seat"]' : 'input', box);
+  const mine = leg ? all.filter(i => i.dataset.leg === leg) : [];
+  const pool = mine.length ? mine : all;
+  return pool.find(i => !i.value) || pool[0] || N.$('button', box);
+}
+function jumpTo(param, view) {
+  const [kind, leg] = str(param).split('/');
+  const box = DEEP[kind] && document.getElementById(DEEP[kind]);
+  const part = box && box.closest('section');
+  if (!part || !view) return;
+  // offsetTop ignores the entrance transforms that getBoundingClientRect would include.
+  let y = 0;
+  for (let n = part; n && n !== view; n = n.offsetParent) y += n.offsetTop;
+  const head = ['.tb', '#strip'].reduce((a, q) => a + ((N.$(q, view) || {}).offsetHeight || 0), 0);
+  const top = Math.max(0, Math.min(y - head - 12, view.scrollHeight - view.clientHeight));
+  try { view.scrollTo({top, behavior: N.reduce ? 'auto' : 'smooth'}); } catch (e) { view.scrollTop = top; }
+  const f = jumpField(box, kind, leg);
+  if (f) f.focus({preventScroll: true});
+  part.classList.remove('wl-flash'); void part.offsetWidth; part.classList.add('wl-flash');
+  clearTimeout(W.timers.flash);
+  W.timers.flash = setTimeout(() => part.classList.remove('wl-flash'), 1600);
+}
+
 const walletDef = {
   back: 'today', nav: false, static: true, uses: ['trip'], title: 'Wallet',
-  render() {
+  render(ctx) {
     const rise = firstPaint();
+    if (rise) W.jump = ctx && ctx.param || '';
     initDraft();
     return {
-      hero: hero('Only you can see this', 'lock', 'Wallet', 'Saved on this phone only. Nothing here is sent anywhere.'),
+      hero: bar('Codes, seats and notes', 'lock', 'Wallet', 'Saved only on this phone.'),
       body: h`<div class="wl wl-w">
-        ${sec('wl-booking', 'Booking', bookingHtml(), 0, rise)}
+        ${sec('wl-booking', '', bookingHtml(), 0, rise)}
         ${sec('wl-people', 'Travelers', peopleHtml(), 1, rise)}
         ${sec('wl-seats', 'Seats', seatsHtml(), 2, rise)}
         ${sec('wl-bags', 'Checked bags', bagsHtml(), 3, rise)}
         ${sec('wl-hotel', 'Hotel', hotelHtml(), 4, rise)}
         ${sec('wl-notes', 'Notes', notesHtml(), 5, rise)}
-        ${sec('wl-clear', 'Remove', clearHtml(), 6, rise)}
+        ${sec('wl-clear', '', clearHtml(), 6, rise)}
         <div class="wl-saved" id="wl-saved" role="status" aria-live="polite"></div>
       </div>`,
     };
@@ -416,6 +472,8 @@ const walletDef = {
     view.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', flush);
+    // #wallet/hotel and friends: wait for the router to set its own scroll first.
+    const jt = W.jump ? setTimeout(() => { const p = W.jump; W.jump = ''; jumpTo(p, view); }, 0) : 0;
     // Seats and hotel depend on the trip file, which can arrive after this screen opened.
     const off = N.on('data', name => {
       if (name !== 'trip') return;
@@ -426,6 +484,7 @@ const walletDef = {
       });
     });
     return () => {
+      clearTimeout(jt);
       flush();
       view.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onVis);
@@ -492,6 +551,9 @@ const walletDef = {
       flush();
       fill('wl-people', peopleHtml);
       fill('wl-seats', seatsHtml);
+      // The toast already says it's done; don't stack the "Saved" pill under it (a failed save still shows).
+      const sv = document.getElementById('wl-saved');
+      if (sv && !sv.classList.contains('bad')) { clearTimeout(W.savedT); sv.classList.remove('on'); }
       N.toast('Traveler and their seats removed');
     },
     wbags(el, ev, ctx, arg) {
@@ -537,17 +599,15 @@ function themeHtml() {
   const t = N.theme();
   const sys = matchMedia('(prefers-color-scheme: dark)').matches;
   const b = (k, ic, label) => h`<button data-act="theme" data-arg="${k}" aria-pressed="${pressed(t === k)}">${icon(ic)}${label}</button>`;
-  const note = t === 'dark' ? 'Always dark, whatever your iPhone is set to.'
-    : t === 'light' ? 'Always light, whatever your iPhone is set to.'
-      : `Follows your iPhone’s appearance setting, which is ${sys ? 'Dark' : 'Light'} right now.`;
+  const note = t === 'dark' ? 'Always dark.' : t === 'light' ? 'Always light.' : `Matches your iPhone, ${sys ? 'dark' : 'light'} right now.`;
   return h`<div class="seg wl-seg" role="group" aria-label="Theme">${b('auto', 'circle-half-2', 'Auto')}${b('light', 'sun', 'Light')}${b('dark', 'moon', 'Dark')}</div>
-    <div class="wl-hint">${note}</div>`;
+    <p class="help">${note}</p>`;
 }
 function leaveLine(lv, from, buf) {
   const ap = lv.leg.from;
   const reach = N.addMin(lv.at, lv.drive);
   const ahead = N.mins(reach, lv.leg.dep.time);
-  const drive = lv.source === 'traffic' ? `${lv.drive} min drive (from the latest traffic check)` : `${lv.drive} min drive`;
+  const drive = lv.source === 'traffic' ? `${lv.drive} min drive (with traffic)` : `${lv.drive} min drive`;
   return h`<div class="wl-lv"><b>${N.date(lv.at, ap)}: leave ${from} at <span class="tn">${N.time(lv.at, ap)}</span></b>
     <span>${buf ? `That’s ${buf} min earlier than the plan. ` : ''}A ${drive} gets you to ${ap} at ${N.time(reach, ap)}, ${N.dur(ahead)} before ${lv.leg.flight} leaves at ${N.time(lv.leg.dep.time, ap)}.</span></div>`;
 }
@@ -557,22 +617,24 @@ function bufHtml() {
   const ahead = lv => lv && lv.leg && lv.leg.dep && T(lv.leg.dep.time) > now;
   const out = leave('out'), ret = leave('ret');
   const rows = [];
-  if (!N.data.trip) rows.push(h`<p class="wl-p wl-note">Leave times appear here once the trip has loaded.</p>`);
+  if (!N.data.trip) rows.push(h`<p class="help">Leave times show here once the trip loads.</p>`);
   else {
     if (ahead(out)) rows.push(leaveLine(out, 'home', b));
+    // Flights home still to come, by their date at the departure airport (they may have no times yet).
+    const retDue = safe(() => N.dirLegs('ret'), []).some(l => !l.date || l.date >= N.ymd(N.now(), l.from || 'NYC'));
     if (ahead(ret)) rows.push(leaveLine(ret, 'the hotel', b));
-    else if (!ret) rows.push(h`<p class="wl-p wl-note">The flights home have no confirmed times yet, so there’s no leave time for that day. This extra time will apply to it too.</p>`);
-    if (!rows.length) rows.push(h`<p class="wl-p wl-note">No flights left on this trip.</p>`);
+    else if (!ret && retDue) rows.push(h`<p class="help">The flights home have no times yet. This extra time applies to them too.</p>`);
+    if (!rows.length) rows.push(h`<p class="help">${legs().length ? 'No flights left on this trip.' : 'No flights on this trip yet.'}</p>`);
   }
-  return h`${stepper('sbuf', b ? `+${b} min` : 'None', b ? 'added to every leave time' : 'leave on the plan’s time', '5 minutes less', '5 minutes more', b > 0, b < 60)}
+  return h`${stepper('sbuf', b ? `+${b} min` : 'None', b ? 'added to every leave time' : 'leave at the planned time', '5 minutes less', '5 minutes more', b > 0, b < 60)}
     <div class="wl-col wl-gap">${rows}</div>`;
 }
 function lockHtml() {
   const off = !N.online();
   if (!S.ask) {
-    return h`<p class="wl-p">Locking removes the trip key and downloaded trip files from this phone. You’ll need the trip passphrase to open the app again. Wallet and settings stay. To remove Wallet details too, use Clear Wallet on the Wallet screen.</p>
-      ${off ? h`<div class="co rose wl-gap">${icon('wifi-off')}<span>You’re offline. After locking you can’t unlock again until you have signal.</span></div>` : ''}
-      <button class="btn alt wl-wide wl-gap" data-act="slock">${icon('lock')}Lock this phone</button>`;
+    return h`${off ? h`<div class="co rose">${icon('wifi-off')}<span>You’re offline. Once locked, you can’t unlock until you have signal.</span></div>` : ''}
+      <button class="btn alt wl-wide${off ? ' wl-gap' : ''}" data-act="slock">${icon('lock')}Lock this phone</button>
+      <p class="help">Locking hides your trip until you enter the passphrase again.</p>`;
   }
   return h`<div class="wl-confirm" role="group" aria-labelledby="wl-lq">
     <b id="wl-lq">Lock nyc. on this phone?</b>
@@ -581,12 +643,20 @@ function lockHtml() {
       <button class="btn rose grow" data-act="slock-yes">Lock now</button></div></div>`;
 }
 function appHtml() {
-  return h`<div class="wl-card"><div class="rw c"><span class="ic">${icon('device-mobile')}</span><div class="grow"><b>Version</b><small class="tn">${str(N.cfg && N.cfg.build) || 'dev'}</small></div></div>
-    <p class="wl-p wl-sm">Updates download when you open the app and take over the next time you switch away from it.</p></div>
-    <button class="btn alt wl-wide wl-gap" data-act="reload">${icon('refresh')}Reload now</button>`;
+  return h`<button class="btn alt wl-wide" data-act="reload">${icon('refresh')}Reload now</button>
+    <p class="help">Updates install by themselves the next time you switch away from the app.</p>`;
+}
+const verHtml = () => h`<p class="wl-ver tn">Version ${str(N.cfg && N.cfg.build).slice(0, 7) || 'dev'}</p>`;
+// Lock-screen alerts are set up on #alerts (alerts.js). This row shows their state in one word.
+function alertsHtml() {
+  const w = N.alerts ? N.alerts.word() : 'Off';
+  return h`<a class="wl-card rw c al-row" href="#alerts"><span class="ic">${icon(w === 'Off' ? 'bell-off' : 'bell')}</span>
+    <div class="grow"><b>Lock-screen alerts</b><small>Gate changes and delays</small></div>
+    <span class="al-w ${w.toLowerCase()}">${w}</span>${icon('chevron-right')}</a>`;
 }
 function settingsUpdate() {
   fill('wl-s-theme', themeHtml);
+  fill('wl-s-al', alertsHtml);
   fill('wl-s-buf', bufHtml);
   fill('wl-s-lock', lockHtml);
 }
@@ -596,12 +666,14 @@ N.screen('settings', {
     const rise = firstPaint();
     if (rise) S.ask = false;
     return {
-      hero: hero('This phone', 'settings', 'Settings', 'Theme, leave time and lock. These stay on this phone.', true),
+      hero: bar('This phone', 'settings', 'Settings'),
       body: h`<div class="wl wl-s">
         ${sec('wl-s-theme', 'Theme', themeHtml(), 0, rise)}
-        ${sec('wl-s-buf', 'Extra time before leaving', bufHtml(), 1, rise)}
-        ${sec('wl-s-lock', 'Lock', lockHtml(), 2, rise)}
-        ${sec('wl-s-app', 'App', appHtml(), 3, rise)}
+        ${sec('wl-s-al', 'Alerts', alertsHtml(), 1, rise)}
+        ${sec('wl-s-buf', 'Leave time', bufHtml(), 2, rise)}
+        ${sec('wl-s-lock', 'Lock', lockHtml(), 3, rise)}
+        ${sec('wl-s-app', 'App', appHtml(), 4, rise)}
+        ${verHtml()}
       </div>`,
     };
   },
@@ -637,6 +709,7 @@ N.screen('settings', {
 const JOBS = {photos: {running: false}, tiles: {running: false}};
 const PLAN_KEY = 'nyc.offline';   // when photos/maps were last saved (no Wallet data)
 const TILE_CAP = 2500;
+const STALL_MS = 60000;      // no progress for this long and a save is treated as stopped
 // Areas to keep, as [south, west, north, east] and a zoom range.
 const AREAS = [
   {b: [40.63, -74.09, 40.835, -73.85], z: [11, 13]},     // all of NYC, zoomed out (matches data/basemap.json)
@@ -655,6 +728,12 @@ function addAround(set, lat, lon, z, r) {
   const x0 = lon2x(lon, z), y0 = lat2y(lat, z);
   for (let x = x0 - r; x <= x0 + r; x++) for (let y = y0 - r; y <= y0 + r; y++) set.add(`${z}/${x}/${y}`);
 }
+// Carto's tiles need a key: without one every tile is an "API key required"
+// card, so the maps draw land, parks and main roads from data/basemap.json
+// and never ask for tiles (the same rule as place.js, food.js and transit.js).
+// Only offer to save tiles once a map would actually show them.
+const tilesOk = t => !!(t && typeof t.url === 'string' && t.url && (!/basemaps\.cartocdn\.com/.test(t.url) || /[?&](api_?key|key|token)=/i.test(t.url)));
+const tilesUsable = () => safe(() => tilesOk(N.tiles(false)), false);
 // The same URLs Leaflet asks for: N.tiles() template, its subdomain rule and the @2x retina suffix.
 function tileUrl(key, dark) {
   const [z, x, y] = key.split('/').map(Number);
@@ -699,34 +778,40 @@ function photoPlan() {
 function jobHtml(k) {
   const j = JOBS[k];
   const tiles = k === 'tiles';
+  // Without a tile key the maps draw from a file shipped with the app, so there is nothing to save.
+  if (tiles && !tilesUsable()) return '';
   const plan = tiles ? tilePlan() : photoPlan();
   const last = (N.get(PLAN_KEY, {}) || {})[k];
   const z = zone();
   const desc = tiles
     ? `Street detail for ${[ 'Manhattan', 'LaGuardia', 'the drive between them', plan.hotel && 'your hotel’s blocks', plan.food && 'the food list’s neighborhoods' ].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1')}, plus all of NYC zoomed out. ${fmtN(plan.count)} map tiles, about ${mbText(plan.bytes)}.`
     : plan.count ? `${fmtN(plan.count)} photos from ${N.plural(plan.places, 'place')}, about ${mbText(plan.bytes)}.` : 'The food list hasn’t loaded on this phone yet.';
-  const extra = tiles ? (plan.dark ? 'Includes the dark map, since the app is dark right now.' : 'Light map only. If the app switches to dark, save again to add the dark map.') : '';
+  const extra = tiles ? (plan.dark ? 'Includes the dark map.' : 'Light map only. Save again in dark mode to add the dark map.') : '';
   let status = '', pct = null;
   if (j.running) {
     pct = j.total ? j.done / j.total : 0;
     status = `Saving ${fmtN(j.done)} of ${fmtN(j.total)}…`;
   } else if (j.msg === 'nosw') {
-    status = 'Saving for offline isn’t available in this window. Open nyc. from your Home Screen, then try again.';
+    status = 'Open nyc. from your Home Screen to save for offline.';
   } else if (j.msg === 'none') {
     status = 'Nothing to save yet.';
+  } else if (j.msg === 'stalled') {
+    const got = Math.max(0, j.done - j.failed);
+    pct = j.total ? got / j.total : 0;
+    status = `Stopped at ${fmtN(got)} of ${fmtN(j.total)} when the connection dropped. What’s saved stays saved.`;
   } else if (last && last.total) {
     const got = Math.max(0, (last.done || 0) - (last.failed || 0));
     pct = got / last.total;
-    status = `Saved ${when(last.at, z)}: ${fmtN(got)} of ${fmtN(last.total)}.${last.failed ? ` ${fmtN(last.failed)} didn’t download; tap again on better signal to fill the gaps.` : ''}`;
+    status = `Saved ${when(last.at, z)}: ${fmtN(got)} of ${fmtN(last.total)}.${last.failed ? ` ${fmtN(last.failed)} missed. Try again with better signal.` : ''}`;
   }
   const off = !N.online();
   const disabled = j.running || off || !plan.count;
-  const label = j.running ? 'Saving…' : off ? 'Needs a connection' : last ? (tiles ? 'Save maps again' : 'Save photos again') : (tiles ? 'Save NYC street maps' : 'Save food photos');
+  const label = j.running ? 'Saving…' : off ? 'Needs a connection' : j.msg === 'stalled' ? 'Carry on saving' : last ? (tiles ? 'Save maps again' : 'Save photos again') : (tiles ? 'Save NYC street maps' : 'Save food photos');
   return h`<div class="wl-job" id="wl-job-${k}">
     <div class="rw c"><span class="ic">${icon(tiles ? 'map-2' : 'photo')}</span><div class="grow"><b>${tiles ? 'NYC street maps' : 'Food photos'}</b><small>${desc}</small></div></div>
-    ${extra ? h`<p class="wl-p wl-sm">${extra}</p>` : ''}
+    ${extra ? h`<p class="help">${extra}</p>` : ''}
     ${pct != null ? h`<div class="wl-bar" role="progressbar" aria-label="${tiles ? 'Map tiles saved' : 'Photos saved'}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct * 100)}"><i style="width:${Math.round(pct * 100)}%"></i></div>` : ''}
-    ${status ? h`<p class="wl-p wl-sm" role="status">${status}</p>` : ''}
+    ${status ? h`<p class="help" role="status">${status}</p>` : ''}
     <button class="btn wl-wide wl-gap" data-act="dsave" data-arg="${k}"${attr(disabled, ' aria-disabled="true"')}>${icon(off ? 'wifi-off' : 'download')}${label}</button>
   </div>`;
 }
@@ -750,36 +835,32 @@ async function paintUsage() {
   const el = document.getElementById('wl-d-use');
   if (!el) return;
   const c = u && u.counts || null;
-  const counts = c ? ` · ${fmtN(c['nyc-tiles'] || 0)} map tiles and ${fmtN(c['nyc-photos'] || 0)} photos saved` : '';
+  const maps = tilesUsable() || !!(c && c['nyc-tiles']);
+  const counts = c ? ` · ${maps ? `${fmtN(c['nyc-tiles'] || 0)} map tiles and ` : ''}${fmtN(c['nyc-photos'] || 0)} photos saved` : '';
   el.innerHTML = String(bytes == null
     ? h`<span>This browser doesn’t say how much storage the app uses.</span>`
-    : h`<b>Using ${mbText(bytes)} on this phone</b><span>${counts ? counts.slice(3) + '. ' : ''}The phone keeps up to 3,000 map tiles and 1,600 photos; the oldest go first when that fills up.</span>`);
+    : h`<b>Using ${mbText(bytes)} on this phone</b><span>${counts ? counts.slice(3) + '. ' : ''}The phone keeps up to ${maps ? '3,000 map tiles and ' : ''}1,600 photos; the oldest go first when that fills up.</span>`);
 }
 
+// The hero line: when flights were last checked, and a warning once that's old.
+function dataSub() {
+  const f = safe(() => N.fresh(), {level: 'stale'});
+  if (!f.at) return 'Flight status hasn’t been checked yet.';
+  const late = f.level === 'stale' && safe(() => N.phase(), 'stay') !== 'after';
+  return h`Last checked ${when(f.at, zone())} (<span data-ago="${f.at}">${N.ago(f.at)}</span>).${late ? ' Gates and times may have changed.' : ''}`;
+}
 function freshHtml() {
-  const st = N.data.status;
-  const at = st && st.checked_at;
+  const at = safe(() => N.data.status.checked_at, null);
   const f = safe(() => N.fresh(), {level: 'stale', window: null});
-  const z = zone();
-  const win = f.window;
   const ms = N.meta.status || {};
   const off = !N.online();
-  const dot = f.level === 'fresh' ? '' : f.level === 'neutral' ? ' neutral' : ' stale';
-  const now = N.now().getTime();
-  let next = '';
-  if (at) {
-    const due = T(at) + (win ? 10 : 120) * 60000;
-    next = due > now ? ` Next one due about ${N.time(new Date(due).toISOString(), z)}.` : win ? ' The next one is due now.' : '';
-  }
-  const poll = ms.fetched_at ? new Date(T(ms.fetched_at) + (win ? 2 : 10) * 60000) : null;
-  return h`<div class="wl-card">
-    <div class="wl-fresh"><span class="dot${dot}"></span><b>${at ? `Checked ${when(at, z)}` : 'Not checked yet'}</b>${at ? h`<span class="mu" data-ago="${at}">${N.ago(at)}</span>` : ''}</div>
-    <p class="wl-p">The update service checks your flights every 10 minutes on travel days and about every 2 hours around the trip.${next}</p>
-    <p class="wl-p">While the app is open, this phone looks for new results every ${win ? '2' : '10'} minutes${poll ? ` (next about ${N.time(poll.toISOString(), z)})` : ''} and whenever you come back to it.</p>
-    ${ms.error ? h`<div class="co rose wl-gap">${icon('alert-triangle')}<span>The last try couldn’t reach the update service (${ms.error}). Showing what this phone saved.</span></div>` : ''}
-    ${off ? h`<div class="co plain wl-gap">${icon('wifi-off')}<span>You’re offline. Checks start again when you have signal.</span></div>` : ''}
-    <button class="btn wl-wide wl-gap" data-act="refresh"${attr(off, ' aria-disabled="true"')}>${icon('refresh')}Check now</button>
-  </div>`;
+  // Same cadence the strip uses (the cloud's own run.cadence_s when it is slower): 1, 10 or 60 min.
+  const due = at ? T(at) + (+f.cadence || (f.window ? 600 : 3600)) * 1000 : 0;
+  const next = due > N.now().getTime() ? ` Next check about ${N.time(new Date(due).toISOString(), zone())}.` : '';
+  return h`${ms.error ? h`<div class="co rose">${icon('alert-triangle')}<span>Couldn’t reach the update service (${ms.error}). Showing what this phone saved.</span></div>` : ''}
+    ${off ? h`<div class="co plain${ms.error ? ' wl-gap' : ''}">${icon('wifi-off')}<span>You’re offline. Checks start again when you have signal.</span></div>` : ''}
+    <button class="btn wl-wide${ms.error || off ? ' wl-gap' : ''}" data-act="refresh"${attr(off, ' aria-disabled="true"')}>${icon('refresh')}Check now</button>
+    <p class="help">Flights are checked every minute in the 3 hours before takeoff, every 10 minutes on travel days and hourly otherwise.${next}</p>`;
 }
 const FILE_ROWS = [
   ['trip', 'plane', 'Flights & hotel', d => `${N.plural((d.legs || []).length, 'flight')}${d.updated_at ? ` · updated ${N.date(d.updated_at, 'NYC')}` : ''}`],
@@ -802,25 +883,32 @@ function filesHtml() {
     return h`<div class="rw c wl-r"><span class="ic">${icon(ic)}</span><div class="grow"><b>${title}</b><small>${detail}</small>${src ? h`<small>${src}</small>` : ''}</div><span class="dot${d ? (err ? ' neutral' : '') : ' stale'}" aria-label="${d ? 'Saved' : 'Missing'}"></span></div>`;
   })}</div>`;
 }
-const WORKS = ['Flights, gates and leave times, as last checked', 'Airport guides and transit steps', 'Food list and opening hours',
-  'Food photos and street maps you’ve saved below or already viewed', 'Wallet, seats and notes'];
+// What works offline depends on which trip files this phone actually has; a file that never
+// downloaded is listed as missing rather than promised.
+const FILE_WORKS = [['trip', 'Flights, gates and leave times, as last checked'], ['guide', 'Airport guides and transit steps'], ['food', 'Food list and opening hours']];
+const hasFile = n => !!safe(() => N.data[n], null);
+const WORKS = () => [...FILE_WORKS.filter(([n]) => hasFile(n)).map(([, t]) => t),
+  ...(tilesUsable() ? ['Food photos and street maps you’ve saved below or already viewed']
+    : ['Maps of land, parks and main roads', 'Food photos you’ve saved below or already viewed']), 'Wallet, seats and notes'];
+const MISSING = () => FILE_WORKS.filter(([n]) => !hasFile(n)).map(([, t]) => t.replace(/, as last checked$/, ''));
 const NEEDS = ['New gate, delay and traffic checks', 'Directions in Apple Maps'];
+const lc = t => t.charAt(0).toLowerCase() + t.slice(1);
 function offHtml() {
-  return h`<ul class="wl-list">${WORKS.map(t => h`<li>${icon('check')}<span>${t}</span></li>`)}${NEEDS.map(t => h`<li class="no">${icon('wifi-off')}<span>Needs signal: ${t.charAt(0).toLowerCase() + t.slice(1)}</span></li>`)}</ul>
-    <div class="co plain wl-gap">${icon('map')}<span>For directions with no signal, download New York in Apple Maps first: tap your picture, then Offline Maps.</span></div>`;
+  return h`<ul class="wl-list">${WORKS().map(t => h`<li>${icon('check')}<span>${t}</span></li>`)}${MISSING().map(t => h`<li class="no">${icon('alert-triangle')}<span>Not on this phone yet: ${lc(t)}</span></li>`)}${NEEDS.map(t => h`<li class="no">${icon('wifi-off')}<span>Needs signal: ${lc(t)}</span></li>`)}</ul>
+    <p class="help">For directions with no signal, download New York in Apple Maps first: tap your picture, then Offline Maps.</p>`;
 }
 function saveHtml() {
   return h`<div class="stack">${jobHtml('photos')}${jobHtml('tiles')}</div>
     <div class="wl-use" id="wl-d-use"><span>Checking storage…</span></div>`;
 }
 N.screen('data', {
-  back: 'today', nav: false, uses: ['trip', 'guide', 'food', 'status'], title: 'Data & offline', keepScroll: true,
+  back: 'today', nav: false, uses: ['trip', 'guide', 'food', 'status'], title: 'Data & updates', keepScroll: true,
   render() {
     const rise = firstPaint();
     return {
-      hero: hero('Data & offline', 'refresh', 'Data', 'What this phone has saved, how fresh it is, and what works with no signal.'),
+      hero: bar('This phone', 'refresh', 'Data & updates', dataSub(), 'wl-d-sub'),
       body: h`<div class="wl wl-d">
-        ${sec('wl-d-fresh', 'Flight status', freshHtml(), 0, rise)}
+        ${sec('wl-d-fresh', '', freshHtml(), 0, rise)}
         ${sec('wl-d-files', 'Trip files', filesHtml(), 1, rise)}
         ${sec('wl-d-off', 'With no signal', offHtml(), 2, rise)}
         ${sec('wl-d-save', 'Save for offline', saveHtml(), 3, rise)}
@@ -830,6 +918,7 @@ N.screen('data', {
   mount() {
     paintUsage();
     const off = N.on('net', () => {
+      fill('wl-d-sub', dataSub);
       fill('wl-d-fresh', freshHtml);
       fill('wl-d-files', filesHtml);
       Object.keys(JOBS).forEach(k => { if (!JOBS[k].running) paintJob(k); });
@@ -837,33 +926,62 @@ N.screen('data', {
     return off;
   },
   update() {
+    fill('wl-d-sub', dataSub);
     fill('wl-d-fresh', freshHtml);
     fill('wl-d-files', filesHtml);
+    fill('wl-d-off', offHtml);
     Object.keys(JOBS).forEach(k => { if (!JOBS[k].running) paintJob(k); });
   },
   actions: {
     async dsave(el, ev, ctx, k) {
       const j = JOBS[k];
       if (!j || j.running) return;
+      if (k === 'tiles' && !tilesUsable()) return;
       if (!N.online()) { N.toast('Needs a connection'); return; }
       const urls = k === 'tiles' ? tilePlan().urls : photoPlan().urls;
       if (!urls.length) { j.msg = 'none'; paintJob(k); return; }
       try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* not supported */ }
-      Object.assign(j, {running: true, done: 0, failed: 0, total: urls.length, msg: ''});
+      const gen = (j.gen || 0) + 1;
+      Object.assign(j, {running: true, done: 0, failed: 0, total: urls.length, msg: '', gen});
       paintJob(k);
+      const record = (done, failed, total) => {
+        const all = N.get(PLAN_KEY, {}) || {};
+        all[k] = {at: N.now().toISOString(), done, failed, total};
+        N.set(PLAN_KEY, all);
+      };
+      // The service worker posts progress as files arrive and has no timeout of its
+      // own. If nothing arrives for a minute (signal gone, or iOS stopped the worker
+      // while the app was in the background), stop showing "Saving…" so the button
+      // works again. What it saved stays saved, and the next tap skips those files.
+      let quiet = 0;
+      const stall = () => {
+        if (j.gen !== gen || !j.running) return;
+        j.running = false; j.msg = 'stalled';
+        const got = Math.max(0, j.done - j.failed);
+        record(j.total, j.total - got, j.total);
+        paintJob(k); paintUsage();
+        N.toast('Saving stopped: the connection went quiet');
+      };
+      const arm = () => { clearTimeout(quiet); quiet = setTimeout(stall, STALL_MS); };
+      arm();
       let res = null;
       try {
         res = N.sw && N.sw.prefetch ? await N.sw.prefetch(urls, k, m => {
+          if (j.gen !== gen) return;   // a newer tap took over
+          if (m && m.final) return;    // handled once the promise settles
           j.done = +m.done || 0; j.failed = +m.failed || 0; j.total = +m.total || j.total;
+          if (!j.running && j.msg === 'stalled') { j.running = true; j.msg = ''; } // it picked up again
+          arm();
           paintJob(k);
         }) : null;
       } catch (e) { res = null; }
+      if (j.gen !== gen) return;
+      clearTimeout(quiet);
       j.running = false;
       if (!res) { j.msg = 'nosw'; paintJob(k); return; }
+      j.msg = '';
       const done = +res.done || j.done, failed = +res.failed || 0, total = +res.total || j.total;
-      const all = N.get(PLAN_KEY, {}) || {};
-      all[k] = {at: N.now().toISOString(), done, failed, total};
-      N.set(PLAN_KEY, all);
+      record(done, failed, total);
       paintJob(k);
       paintUsage();
       N.toast(failed ? `Saved ${fmtN(done - failed)} of ${fmtN(total)}` : k === 'tiles' ? 'Street maps saved for offline' : 'Food photos saved for offline');
@@ -897,11 +1015,15 @@ function fold(line) {
 function calPlan() {
   const now = N.now().getTime();
   const inc = [], out = [];
+  // A flight whose day has gone by at its airport, for flights with no times to go on.
+  const past = l => !!l.date && l.date < N.ymd(N.now(), l.from || 'NYC');
   for (const l of legs()) {
     const dep = l.dep && l.dep.sched, arr = l.arr && l.arr.sched;
-    if (l.confirmed === false) out.push({l, why: 'unconfirmed'});
-    else if (!dep || !arr || !Number.isFinite(T(dep)) || !Number.isFinite(T(arr))) out.push({l, why: 'notimes'});
-    else if (T(arr) < now) out.push({l, why: 'flown'});
+    const timed = dep && arr && Number.isFinite(T(dep)) && Number.isFinite(T(arr));
+    const gone = timed ? T(arr) < now : past(l);
+    if (gone) out.push({l, why: timed && l.confirmed !== false ? 'flown' : 'past'});
+    else if (l.confirmed === false) out.push({l, why: 'unconfirmed'});
+    else if (!timed) out.push({l, why: 'notimes'});
     else inc.push(l);
   }
   return {inc, out};
@@ -937,10 +1059,12 @@ const listText = a => a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} 
 function leftOutText(out) {
   const by = why => out.filter(o => o.why === why).map(o => o.l);
   const rows = [];
-  const un = by('unconfirmed'), nt = by('notimes'), fl = by('flown');
-  const days = ls => [...new Set(ls.map(legDay))].join(', ');
-  if (fl.length) rows.push(`${listText(fl.map(l => l.flight))} already flew, so ${fl.length === 1 ? 'it’s' : 'they’re'} left out.`);
-  if (un.length) rows.push(`${listText(un.map(legName))} (${days(un)}) ${un.length === 1 ? 'isn’t' : 'aren’t'} included: ${un.every(l => l.dir === 'ret') ? 'the flights home aren’t' : un.length === 1 ? 'it isn’t' : 'they aren’t'} confirmed yet. Come back here once ${un.length === 1 ? 'it is' : 'they are'}.`);
+  const un = by('unconfirmed'), nt = by('notimes'), fl = by('flown'), gone = by('past');
+  const days = ls => listText([...new Set(ls.map(legDay))].filter(d => d && d !== '—'));
+  if (fl.length) rows.push(`${listText(fl.map(l => l.flight || legName(l)))} already flew, so ${fl.length === 1 ? 'it’s' : 'they’re'} left out.`);
+  const gd = days(gone), ud = days(un);
+  if (gone.length) rows.push(`${listText(gone.map(legName))} ${gd ? `${gone.length === 1 ? 'was' : 'were'} on ${gd}` : `${gone.length === 1 ? 'is' : 'are'} in the past`}, so ${gone.length === 1 ? 'it’s' : 'they’re'} left out.`);
+  if (un.length) rows.push(`${listText(un.map(legName))}${ud ? ` (${ud})` : ''} ${un.length === 1 ? 'isn’t' : 'aren’t'} included: ${un.every(l => l.dir === 'ret') ? 'the flights home aren’t' : un.length === 1 ? 'it isn’t' : 'they aren’t'} confirmed yet. Come back here once ${un.length === 1 ? 'it is' : 'they are'}.`);
   if (nt.length) rows.push(`${listText(nt.map(legName))} ${nt.length === 1 ? 'has' : 'have'} no scheduled times yet, so ${nt.length === 1 ? 'it’s' : 'they’re'} left out.`);
   return rows;
 }
@@ -961,22 +1085,21 @@ N.screen('calendar', {
     const add = !hasTrip
       ? h`<div class="co plain">${icon('info-circle')}<span>Your flights appear here once the trip has loaded on this phone.</span></div>`
       : inc.length
-        ? h`<div class="wl-card wl-rows">${events}</div>`
+        ? h`<div class="wl-card wl-rows">${events}</div><p class="help">Each flight gets an alert the day before and 3 hours before.</p>`
         : h`<div class="wl-card wl-empty"><b>Nothing to add right now</b>${(out.length ? leftOutText(out) : ['There are no upcoming flights with scheduled times.']).map(t => h`<p>${t}</p>`)}</div>`;
     return {
-      hero: hero('Flights', 'calendar-plus', 'Calendar', 'Put your flights in the iPhone Calendar, with alerts the day before and 3 hours before.', true),
+      hero: bar('Flights', 'calendar-plus', 'Add to Calendar'),
       body: h`<div class="wl wl-c">
-        ${sec('wl-c-what', 'What gets added', add, 0, rise)}
-        ${out.length && inc.length ? h`<div class="stack8 wl-gap${rise ? ' rise' : ''}" style="animation-delay:45ms">${leftOutHtml(out)}</div>` : ''}
-        ${inc.length ? h`<section class="sec${rise ? ' rise' : ''}" style="animation-delay:90ms">
+        ${inc.length ? h`<section class="sec${rise ? ' rise' : ''}">
           <a class="btn wl-wide" id="wl-ics" href="#calendar" download="nyc-flights.ics" type="text/calendar" aria-disabled="true">${icon('calendar-plus')}Add ${N.plural(inc.length, 'flight')} to Calendar</a>
           <button class="btn alt wl-wide wl-gap" id="wl-ics-share" data-act="cshare" hidden>${icon('share')}Share the calendar file</button>
-          <p class="wl-p wl-gap">If your iPhone shows the events, tap Add All. If it saves a file instead, open nyc-flights.ics from Downloads in the Files app.</p>
+          <p class="help">When Calendar opens, tap Add All. If a file downloads instead, open nyc-flights.ics in the Files app.</p>
         </section>` : ''}
+        ${sec('wl-c-what', 'What gets added', add, 1, rise)}
+        ${out.length && inc.length ? h`<div class="stack8 wl-gap${rise ? ' rise' : ''}" style="animation-delay:90ms">${leftOutHtml(out)}</div>` : ''}
         ${sec('wl-c-know', 'Good to know', h`<div class="wl-card wl-rows">
-          <div class="rw c wl-r"><span class="ic">${icon('alert-triangle')}</span><div class="grow"><b>Calendar won’t update itself</b><small>Gate changes and delays show in this app, not in Calendar.</small></div></div>
-          <div class="rw c wl-r"><span class="ic">${icon('calendar')}</span><div class="grow"><b>Scheduled times${asOf ? ` as of ${asOf}` : ''}</b><small>If American changes the schedule, delete these events and add them again.</small></div></div>
-          <div class="rw c wl-r"><span class="ic">${icon('lock')}</span><div class="grow"><b>Nothing private in the file</b><small>No names, confirmation codes or seats from your Wallet.</small></div></div>
+          <div class="rw c wl-r"><span class="ic">${icon('alert-triangle')}</span><div class="grow"><b>Calendar won’t update itself</b><small>Gate changes and delays show here, not in Calendar.</small></div></div>
+          <div class="rw c wl-r"><span class="ic">${icon('calendar')}</span><div class="grow"><b>Scheduled times${asOf ? ` as of ${asOf}` : ''}</b><small>If the schedule changes, delete these events and add them again.</small></div></div>
         </div>`, 3, rise)}
       </div>`,
     };

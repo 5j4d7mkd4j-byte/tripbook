@@ -128,3 +128,40 @@ async function usage(client) {
   try { est = await navigator.storage.estimate(); } catch {}
   client && client.postMessage({type: 'usage', counts: out, usage: est && est.usage, quota: est && est.quota});
 }
+
+// ---------- lock-screen alerts ----------
+// The updater pushes {v, title, body, url, tag, at}; url is an in-app route like
+// "#flight/<id>". Every push must show a notification: iPhone ends the
+// subscription of a web app that receives pushes without showing one.
+self.addEventListener('push', e => {
+  let m = {};
+  try { m = e.data ? e.data.json() : {}; } catch { m = {body: e.data ? e.data.text() : ''}; }
+  if (!m || typeof m !== 'object') m = {body: typeof m === 'string' ? m : ''};   // JSON null, a number, a bare string
+  const opts = {
+    body: String(m.body || 'Something changed with your flights.'),
+    icon: 'icons/icon-192.png',
+    // The sender turns a bad route into a bare "#", which would only open Today.
+    data: {url: typeof m.url === 'string' && m.url.length > 1 && m.url.startsWith('#') ? m.url : '#flights'},
+  };
+  // A newer alert with the same tag replaces the old one and still makes a sound.
+  if (m.tag) { opts.tag = String(m.tag); opts.renotify = true; }
+  if (m.at && !isNaN(Date.parse(m.at))) opts.timestamp = Date.parse(m.at);
+  e.waitUntil(self.registration.showNotification(String(m.title || 'nyc.'), opts));
+});
+
+// Tapping an alert opens the app on the route it names: an open window is
+// focused and told where to go, otherwise a new one opens there.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '#flights';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+    const c = all.find(w => w.url.startsWith(self.registration.scope));
+    if (c) {
+      await c.focus().catch(() => {});
+      c.postMessage({type: 'open', url});
+      return;
+    }
+    await self.clients.openWindow(self.registration.scope + url);
+  })());
+});

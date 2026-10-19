@@ -146,8 +146,12 @@ function build() {
 
   const copied = copyDir(path.join(SRC, 'static'), OUT);
   const CSS = css(), JS = js(), SPRITE = sprite();
-  const id = crypto.createHash('sha256').update(CSS + JS + SPRITE + copied.map(f => f + fs.statSync(f).size).join()).digest('hex').slice(0, 10);
-  const cfg = {build: id};
+  // Public key for lock-screen alerts (screens/alerts.js). It must be app/vapid_public.txt byte for byte, or
+  // Apple refuses every push. It is part of the build id, so a new key also ships a new service worker.
+  const vapidFile = path.join(ROOT, 'app/vapid_public.txt');
+  const VAPID = fs.existsSync(vapidFile) ? read(vapidFile).trim() : '';
+  const id = crypto.createHash('sha256').update(CSS + JS + SPRITE + VAPID + copied.map(f => f + fs.statSync(f).size).join()).digest('hex').slice(0, 10);
+  const cfg = VAPID ? {build: id, vapid: VAPID} : {build: id};
 
   let html = read(path.join(SRC, 'index.html'));
   html = html.replace('/*@CSS*/', () => CSS).replace('<!--@SPRITE-->', () => SPRITE)
@@ -163,7 +167,7 @@ function build() {
     icons: [
       {src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png'},
       {src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png'},
-      {src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable'},
+      {src: 'icons/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable'},
     ],
   };
   fs.writeFileSync(path.join(OUT, 'manifest.webmanifest'), JSON.stringify(manifest, null, 1));

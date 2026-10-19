@@ -23,15 +23,18 @@ const fold = s => String(s == null ? '' : s).toLowerCase().normalize('NFKD').rep
   .replace(/['’‘`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const kfmt = n => n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n);
 const titleCase = s => String(s).replace(/[-_]+/g, ' ').replace(/^\w/, c => c.toUpperCase());
+// a place's name as people say it: Yelp's "Katz's Delicatessen - New York" is just "Katz's Delicatessen". place.js uses it too.
+N.placeName = p => { const n = str(p && p.name); return n.replace(/\s+[-–—|]\s+(new york( city)?|nyc|ny)$/i, '').trim() || n; };
 
 // ---------- types: label, icon, tone ----------
-const TONES = {eb: ['--pill', '--pillt'], ro: ['--rot', '--rog'], s4: ['--s4', '--page'], ok: ['--ok', '--page'], ink: ['--ink', '--page']};
+// thumbnail tints only; rose is kept for closed and closing, so no food type wears it
+const TONES = {eb: ['--pill', '--pillt'], s4: ['--s4', '--page'], ok: ['--ok', '--page'], ink: ['--ink', '--page']};
 const tone = t => { const [a, b] = TONES[t] || TONES.eb; return `--fb:var(${a});--ff:var(${b})`; };
 const TYPES = {
   'sit-down': ['Sit-down', 'armchair', 'eb'], casual: ['Casual', 'bowl', 'eb'], 'to-go': ['To go', 'shopping-bag', 's4'],
-  'quick-bite': ['Quick bite', 'stopwatch', 's4'], dessert: ['Dessert', 'ice-cream-2', 'ro'], coffee: ['Coffee', 'coffee', 's4'],
-  bakery: ['Bakery', 'bread', 'ro'], brunch: ['Brunch', 'egg-fried', 'ok'], 'late-night': ['Late night', 'moon-stars', 'ink'],
-  pizza: ['Pizza', 'pizza', 'ro'], sandwiches: ['Sandwiches', 'baguette', 's4'], bar: ['Bar', 'glass-cocktail', 'ink'],
+  'quick-bite': ['Quick bite', 'stopwatch', 's4'], dessert: ['Dessert', 'ice-cream-2', 's4'], coffee: ['Coffee', 'coffee', 's4'],
+  bakery: ['Bakery', 'bread', 's4'], brunch: ['Brunch', 'egg-fried', 'ok'], 'late-night': ['Late night', 'moon-stars', 'ink'],
+  pizza: ['Pizza', 'pizza', 's4'], sandwiches: ['Sandwiches', 'baguette', 's4'], bar: ['Bar', 'glass-cocktail', 'ink'],
   'date-night': ['Date night', 'sparkles', 'ink'], groups: ['Groups', 'users', 'eb'], outdoor: ['Outdoor', 'sun', 'ok'],
   reservations: ['Reservations', 'calendar-check', 'eb'],
 };
@@ -39,19 +42,35 @@ const typeInfo = t => TYPES[t] || [titleCase(t), 'tools-kitchen-2', 'eb'];
 const CHIP_ORDER = ['sit-down', 'casual', 'to-go', 'quick-bite', 'dessert', 'coffee', 'bakery', 'brunch', 'late-night', 'pizza', 'sandwiches', 'bar', 'date-night', 'groups'];
 const NOT_CHIPS = new Set(['reservations', 'outdoor']);   // these two live in the filter sheet
 const BADGE_ORDER = ['date-night', 'late-night', 'brunch', 'dessert', 'coffee', 'bakery', 'pizza', 'sandwiches', 'bar', 'outdoor', 'groups', 'reservations', 'sit-down', 'casual', 'quick-bite', 'to-go'];
-const PRIMARY = ['pizza', 'bakery', 'dessert', 'coffee', 'bar', 'sandwiches', 'brunch', 'date-night', 'late-night', 'sit-down', 'casual', 'quick-bite', 'to-go', 'groups'];
-const GENERIC = new Set(['date-night', 'late-night', 'sit-down', 'casual', 'quick-bite', 'to-go', 'groups']);
-const CUISINE_ICON = [[/ramen|noodle|hot ?pot|soup|pho\b|udon|dumpling/, 'bowl-chopsticks'], [/seafood|sushi|fish|oyster|poke/, 'fish'],
-  [/bbq|barbe|steak|smokehouse/, 'meat'], [/burger/, 'burger'], [/salad|healthy|vegan|vegetarian/, 'salad'], [/bagel|bakery|bread/, 'bread'],
-  [/ice cream|gelato|frozen/, 'ice-cream-2'], [/dessert|chocolate|cake|donut|doughnut/, 'cake'], [/pizza/, 'pizza'], [/sandwich|deli/, 'baguette'],
-  [/coffee|cafe|tea/, 'coffee'], [/cocktail|wine|beer|bar\b/, 'glass-cocktail']];
+const PRIMARY = ['pizza', 'bakery', 'dessert', 'coffee', 'sandwiches', 'bar', 'brunch', 'date-night', 'late-night', 'sit-down', 'casual', 'quick-bite', 'to-go', 'groups'];
+// these say how you eat, not what: the icon comes from the cuisine instead ("Bar" on a steakhouse is not a cocktail)
+const GENERIC = new Set(['bar', 'brunch', 'date-night', 'late-night', 'sit-down', 'casual', 'quick-bite', 'to-go', 'groups']);
+// the first cuisine can choose between a place's own food types: "Coffee, Bakery" is a coffee shop that bakes
+const LEAD = [[/coffee|espresso|cafe|\btea\b/, 'coffee'], [/bakery|bagel|bread|patisserie/, 'bakery'], [/dessert|ice cream|gelato|chocolate|donut|doughnut/, 'dessert'],
+  [/pizza/, 'pizza'], [/sandwich|\bdeli\b/, 'sandwiches']];
+const CUISINE_ICON = [[/ramen|noodle|hot ?pot|pho\b|udon|dumpling/, 'bowl-chopsticks'], [/soup/, 'soup'], [/seafood|sushi|fish|oyster|poke/, 'fish'],
+  [/bbq|barbe|steak|smokehouse|chicken/, 'meat'], [/burger/, 'burger'], [/salad|healthy|vegan|vegetarian/, 'salad'], [/bagel|bakery|bread|patisserie/, 'bread'],
+  [/ice cream|gelato|frozen/, 'ice-cream-2'], [/dessert|chocolate|cake|donut|doughnut/, 'cake'], [/cookie/, 'cookie'], [/pizza/, 'pizza'],
+  [/sandwich|\bdeli\b/, 'baguette'], [/coffee|espresso|cafe|\btea\b/, 'coffee'], [/cocktail|wine|beer|\bbar\b|pub\b/, 'glass-cocktail', 'drink']];
+// first cuisine, in the place's own order, that names a dish; a bar cuisine counts only when it leads ("Italian, Cocktail Bar" is a restaurant)
+const cuisineIcon = cuisine => {
+  for (let k = 0; k < cuisine.length; k++) {
+    const f = fold(cuisine[k]), hit = CUISINE_ICON.find(([re]) => re.test(f));
+    if (hit && (k === 0 || hit[2] !== 'drink')) return hit[1];
+  }
+  return null;
+};
 function kindOf(types, cuisine) {
-  const t = PRIMARY.find(x => types.includes(x)) || types.find(x => !NOT_CHIPS.has(x)) || null;
+  const lead = fold(cuisine[0]), led = LEAD.find(([re, x]) => re.test(lead) && types.includes(x));
+  // a dish type leads only when some cuisine backs it: "Dessert" on a French bistro or a food hall is one thing on the menu
+  const all = fold(cuisine.join(' ')), backed = x => { const r = LEAD.find(([, y]) => y === x); return !r || !all || r[0].test(all); };
+  const t = (led && led[1]) || PRIMARY.find(x => types.includes(x) && backed(x)) || types.find(x => !NOT_CHIPS.has(x)) || null;
   const [, ic, tn] = t ? typeInfo(t) : [null, 'tools-kitchen-2', 'eb'];
   let i = ic;
-  if (!t || GENERIC.has(t)) {
-    const c = fold(cuisine.join(' '));
-    const hit = CUISINE_ICON.find(([re]) => re.test(c));
+  // no dish in the cuisine: an egg or a bowl still reads as food on a pin, a sofa or a stopwatch does not
+  if (!t || GENERIC.has(t) || !backed(t)) i = cuisineIcon(cuisine) || (t === 'brunch' || t === 'casual' ? ic : 'tools-kitchen-2');
+  else if (t === 'dessert') {   // "Desserts, Ice Cream" is an ice cream shop: the more specific sweet wins
+    const c = fold(cuisine.join(' ')), hit = CUISINE_ICON.find(([re, x]) => ['ice-cream-2', 'cake', 'cookie'].includes(x) && re.test(c));
     if (hit) i = hit[1];
   }
   return {type: t, icon: i, tone: tn};
@@ -78,7 +97,7 @@ function model() {
     if (!p || typeof p !== 'object') return;
     const id = str(p.id);
     if (!id) return;
-    const name = str(p.name) || 'Unnamed spot';
+    const name = N.placeName(p) || 'Unnamed spot';
     const types = strs(p.types), cuisine = strs(p.cuisine), meals = strs(p.meals).map(x => x.toLowerCase());
     const order = strs(p.order), popular = arr(p.popular).map(x => str(x && x.name)).filter(Boolean);
     const rating = num(p.rating), reviews = num(p.reviews) || 0;
@@ -175,7 +194,12 @@ function hoursOf(m, now) {
   try { const r = FD().hours ? FD().hours(m.p, now) : null; return r && r.state ? r : {state: 'unknown', text: 'Hours not listed', short: ''}; }
   catch { return {state: 'unknown', text: 'Hours not listed', short: ''}; }
 }
-const OPEN_RANK = {open: 0, closing: 1, closed: 2, unknown: 3};
+// open now first, closed last. Best keeps quality order inside each group; Open first
+// puts the soonest to close at the top and, once closed, the soonest to open
+const OPEN_RANK = {open: 0, closing: 0, unknown: 1, closed: 2};
+const byOpen = (a, b) => OPEN_RANK[a.hr.state] - OPEN_RANK[b.hr.state];
+const nowKey = m => isOpen(m) ? (m.hr.until == null ? 1e6 : m.hr.until) : m.hr.opensIn == null ? 1e6 : m.hr.opensIn;
+const byNow = (a, b) => byOpen(a, b) || (nowKey(a) - nowKey(b));
 function compute() {
   const M = model();
   const toks = tokens(Q);
@@ -194,12 +218,10 @@ function compute() {
   const list = base.filter(m => pass(m, S));
   const near = S.sort === 'near' && here && !far;
   const by = {
-    best: (a, b) => (hit.get(b.id).s - hit.get(a.id).s) || (b.bayes - a.bayes) || a.i - b.i,
+    best: (a, b) => (hit.get(b.id).s - hit.get(a.id).s) || byOpen(a, b) || (b.bayes - a.bayes) || a.i - b.i,
     near: (a, b) => ((a.d == null ? 1e12 : a.d) - (b.d == null ? 1e12 : b.d)) || (b.bayes - a.bayes),
     top: (a, b) => ((b.rating == null ? -1 : b.rating) - (a.rating == null ? -1 : a.rating)) || (b.reviews - a.reviews) || a.i - b.i,
-    open: (a, b) => (OPEN_RANK[a.hr.state] - OPEN_RANK[b.hr.state])
-      || (a.hr.state === 'closed' ? (a.hr.opensIn == null ? 1e9 : a.hr.opensIn) - (b.hr.opensIn == null ? 1e9 : b.hr.opensIn) : 0)
-      || (b.bayes - a.bayes),
+    open: (a, b) => byNow(a, b) || (b.bayes - a.bayes),
   };
   list.sort(by[S.sort === 'near' && !near ? 'best' : S.sort] || by.best);
   R = {M, toks, hit, base, list, here, far, near, openAll: M.filter(isOpen).length};
@@ -212,52 +234,94 @@ function stars(r) {
   const s = [1, 2, 3, 4, 5].map(i => icon(v >= i ? 'star-filled' : v >= i - .5 ? 'star-half-filled' : 'star'));
   return h`<span class="fd-stars" role="img" aria-label="${`Rated ${r} out of 5`}">${s}</span>`;
 }
-function rateHtml(m, short = false) {
-  if (m.rating == null) return h`<span class="fd-rt"><span class="fd-mu">No rating yet</span></span>`;
-  return h`<span class="fd-rt">${stars(m.rating)}<b>${m.rating.toFixed(1)}</b>${m.reviews ? h`<span class="fd-mu">${short ? `(${kfmt(m.reviews)})` : `${kfmt(m.reviews)} ${m.reviews === 1 ? 'review' : 'reviews'}`}</span>` : ''}</span>`;
+// stars, score, review count and price on one line: ★★★★½ 4.6 (10k) · $$
+function rateHtml(m) {
+  const price = m.price ? h`<span class="fd-mu">· ${m.price}</span>` : '';
+  if (m.rating == null) return h`<span class="fd-rt"><span class="fd-mu">No rating yet</span>${price}</span>`;
+  return h`<span class="fd-rt">${stars(m.rating)}<b>${m.rating.toFixed(1)}</b>${m.reviews ? h`<span class="fd-mu">(${kfmt(m.reviews)})</span>` : ''}${price}</span>`;
 }
 function stInfo(hr) {
   switch (hr.state) {
     case 'open': return {c: 'fd-open', t: hr.until == null ? 'Open 24 hours' : hr.short ? 'Open ' + hr.short.replace(/^Till\b/, 'till') : 'Open now'};
     case 'closing': return {c: 'fd-closing', t: hr.text || 'Closing soon'};
-    case 'closed': return {c: 'fd-closed', t: hr.short && hr.short !== 'Closed' ? hr.short : 'Closed'};
+    case 'closed': return hr.short && hr.short !== 'Closed' ? {c: 'fd-closed fd-later', t: hr.short} : {c: 'fd-closed', t: 'Closed'};
     default: return {c: 'fd-unk', t: 'Hours not listed'};
   }
 }
 const stChip = m => { const s = stInfo(m.hr); return h`<span class="${'fd-oc ' + s.c}" data-fdst="${m.id}"><span class="fd-od"></span>${s.t}</span>`; };
-function awayText(m) {
-  if (m.d == null || R && R.far) return '';
-  const w = N.walkMin ? N.walkMin(m.d) : Math.max(1, Math.round(m.d / 80));
-  const mi = N.distText ? N.distText(m.d) : `${(m.d / 1609.34).toFixed(1)} mi`;
-  return w <= 30 ? `${w} min · ${mi}` : mi;
+// "Deli · 0.4 mi · Open till 11p": what it is, how far (the neighbourhood until we know where you are), then
+// whether it's open, which drops to its own line rather than being cut short.
+const miles = d => d < 160 ? `${Math.round(d / 0.3048 / 10) * 10} ft` : `${(d / 1609.34).toFixed(1)} mi`;
+function metaHtml(m) {
+  const far = m.d != null && !(R && R.far) ? miles(m.d) : '';
+  const at = far || m.hood || m.boro;
+  const what = [m.cuisine[0], at].filter(Boolean).join(' · ');
+  return h`<span class="fd-meta">${what ? h`<span class="fd-mw">${what}</span>` : ''}${stChip(m)}</span>`;
 }
-const awayHtml = m => { const t = awayText(m); return t ? h`<span class="fd-away">${icon(m.d < 2400 ? 'walk' : 'current-location')}${t}</span>` : ''; };
-const thumbUrl = m => safe(() => { const id = FD().cover ? FD().cover(m.p) : null; return id && FD().photo ? FD().photo(id, '348s') : ''; }, '');
+// first photo with an id, food shots before inside ones; read here rather than through N.food.cover, which throws on a
+// null entry or a non-array list and would log an error for every card of one bad record
+const coverId = p => {
+  const ph = p && p.photos;
+  if (!ph || typeof ph !== 'object') return '';
+  for (const k of ['food', 'inside']) for (const x of arr(ph[k])) { const id = str(x && x.id); if (id) return id; }
+  return '';
+};
+const thumbUrl = m => safe(() => { const id = coverId(m.p); return id && FD().photo ? FD().photo(id, '348s') : ''; }, '');
 function thumb(m, cls, w, hgt) {
   const u = thumbUrl(m);
   return h`<span class="${cls}" style="${tone(m.kind.tone)}">${icon(m.kind.icon, 'fd-ki')}${u
     ? h`<img src="${u}" alt="" loading="lazy" decoding="async" width="${w}" height="${hgt}" onerror="this.remove()">` : ''}</span>`;
 }
+// a tag that repeats the cuisine on the line above ("Bakery" under "Bakery", "Bar" under "Cocktail Bars") says nothing new
+function echoes(t, cuisine) {
+  const c = fold(cuisine), r = LEAD.find(([, x]) => x === t);
+  if (!c) return false;
+  if (r && r[0].test(c)) return true;
+  return new RegExp(`\\b${fold(typeInfo(t)[0]).replace(/s$/, '')}s?\\b`).test(c);
+}
+// every tag is drawn; fitBadges then folds the ones that don't fit on the line into "+N"
 function badges(m) {
   const pri = t => { const a = S.types.indexOf(t); return a >= 0 ? a - 100 : (BADGE_ORDER.indexOf(t) + 1 || 99); };
-  const ts = m.types.filter(t => t !== 'reservations' || !m.feat.reservations || true).slice().sort((a, b) => pri(a) - pri(b)).slice(0, 4);
-  return ts.map(t => { const [l, i, tn] = typeInfo(t); return h`<span class="fd-bdg" style="${tone(tn)}">${icon(i)}${l}</span>`; });
+  const ts = m.types.filter(t => !echoes(t, m.cuisine[0])).sort((a, b) => pri(a) - pri(b));
+  if (!ts.length) return '';
+  return h`<span class="fd-bdgs">${ts.map(t => { const [l, i] = typeInfo(t); return h`<span class="fd-bdg">${icon(i)}${l}</span>`; })}<span class="fd-bdg fd-plus" hidden></span></span>`;
+}
+// One read pass for every row's widths, then one write pass, so a long list costs a single layout.
+function fitBadges() {
+  const rows = $$v('.fd-bdgs').map(r => {
+    const bs = N.$$('.fd-bdg:not(.fd-plus)', r);
+    bs.forEach(b => { b.hidden = false; });
+    return {r, bs, more: N.$('.fd-plus', r)};
+  });
+  const sized = rows.map(x => ({...x, w: x.r.clientWidth, ws: x.bs.map(b => b.offsetWidth)}));
+  for (const {bs, more, w, ws} of sized) {
+    if (!w || !more) continue;
+    let k = 0, x = 0;
+    for (; k < bs.length; k++) {
+      const nx = x + (k ? 6 : 0) + ws[k], left = bs.length - k - 1;
+      if (nx + (left ? 6 + 36 : 0) > w) break;   // room for "+N" whenever something is left over
+      x = nx;
+    }
+    k = Math.max(1, k);
+    bs.forEach((b, i) => { b.hidden = i >= k; });
+    more.hidden = k >= bs.length;
+    more.textContent = '+' + (bs.length - k);
+    more.setAttribute('aria-label', `${bs.length - k} more`);
+  }
 }
 function card(m, i, stagger) {
   const hit = R.hit.get(m.id);
   const dish = hit && hit.dish;
-  const ord = dish ? {from: dish.from, t: dish.n} : m.order.length ? {from: 'Order', t: m.order.slice(0, 3).join(', ')} : null;
-  const meta = [m.price, m.cuisine[0], m.hood || m.boro].filter(Boolean).join(' · ');
+  const ord = dish ? {from: dish.from, t: dish.n} : m.order.length ? {from: 'Order', t: m.order[0]} : null;
   const href = 'place/' + m.id;
   return h`<a class="${N.cls('fd-card', stagger && i < 10 && 'rise')}" href="${'#' + href}" data-act="go" data-arg="${href}"${stagger && i < 10 ? h` style="animation-delay:${Math.min(i, 8) * 35}ms"` : ''}>
     ${thumb(m, 'fd-th', 104, 168)}
     <span class="fd-cb">
       <span class="fd-nm">${m.name}</span>
       ${rateHtml(m)}
-      ${meta ? h`<span class="fd-meta">${meta}</span>` : ''}
-      <span class="fd-st">${stChip(m)}${awayHtml(m)}</span>
+      ${metaHtml(m)}
       ${ord ? h`<span class="fd-ord"><b>${ord.from}</b> ${ord.t}</span>` : ''}
-      ${m.types.length ? h`<span class="fd-bdgs">${badges(m)}</span>` : ''}
+      ${badges(m)}
     </span>
   </a>`;
 }
@@ -269,9 +333,12 @@ function clockText() {
 function statsHtml() {
   const M = model();
   if (!M.length) return h`<span class="chip ob">${icon('tools-kitchen-2')}No spots loaded yet</span>`;
+  // one chip: how many are open, or when the first one opens
   const open = R ? R.openAll : 0;
-  return h`<span class="chip ob">${icon('map-pins')}${N.plural(M.length, 'saved spot')}</span>
-    <span class="chip ob" data-fdopen><span class="${N.cls('dot', !open && 'neutral')}"></span>${open ? `${open} open now` : 'None open right now'}</span>`;
+  if (open) return h`<span class="chip ob" data-fdopen><span class="dot"></span>${M.length} saved · ${open} open now</span>`;
+  const nx = R ? R.M.filter(m => m.hr.state === 'closed' && m.hr.opensIn != null).sort((a, b) => a.hr.opensIn - b.hr.opensIn)[0] : null;
+  const t = nx && /^Opens\b/.test(nx.hr.short || '') ? nx.hr.short.replace(/^Opens\b/, 'First opens') : '';
+  return h`<span class="chip ob" data-fdopen><span class="${N.cls('dot', t ? 'fd-dw' : 'neutral')}"></span>${t || `${M.length} saved · none open now`}</span>`;
 }
 const heroHtml = () => h`<div class="fd-hero">
   <p class="ey fd-ey" data-fdclock>${clockText()}</p>
@@ -294,7 +361,8 @@ function chipsHtml() {
   const {base} = R;
   const oBase = base.filter(m => pass(m, S, 'open'));
   const openN = oBase.filter(isOpen).length;
-  const out = [qc('fdOpen', '', S.open, h`<span class="fd-od"></span>Open now<span class="fd-n">${openN}</span>`, !openN && !S.open, `Open now, ${openN}`),
+  // nothing open: the chip would only be a dead end, so it goes until something opens (or it's already on)
+  const out = [openN || S.open ? qc('fdOpen', '', S.open, h`<span class="fd-od"></span>Open now<span class="fd-n">${openN}</span>`, false, `Open now, ${openN}`) : '',
     qc('fdNear', '', S.sort === 'near', h`${icon('current-location')}${locating ? 'Locating…' : 'Near me'}`, false)];
   const tBase = base.filter(m => pass(m, S, 'types'));
   const seen = new Map();
@@ -396,8 +464,9 @@ function resultsHtml(stagger = false) {
 }
 function footHtml() {
   const d = N.data.food || {};
-  const at = str(d.collected_at);
-  const t = at ? safe(() => new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric'}).format(new Date(at)), '') : '';
+  const at = typeof d.collected_at === 'string' ? new Date(d.collected_at) : null;   // a stored timestamp, not "now"
+  const t = at && Number.isFinite(at.getTime())
+    ? safe(() => new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric'}).format(at), '') : '';
   return h`<p class="fd-foot">${t ? `List saved from Yelp on ${t}. ` : ''}Hours can change, so check before a long trip across town.</p>`;
 }
 function bodyHtml(stagger = false) {
@@ -440,6 +509,7 @@ function paintHero() {
 function paintBody(stagger = false) {
   const b = $v('#body');
   if (b) b.innerHTML = String(bodyHtml(stagger));
+  safe(fitBadges);
 }
 function refresh() {
   if (!V) return;
@@ -447,7 +517,7 @@ function refresh() {
   compute();
   paintControls();
   if (S.view === 'map' && MV) syncMap();
-  else { const r = $v('[data-fdres]'); if (r) r.innerHTML = String(resultsHtml()); }
+  else { const r = $v('[data-fdres]'); if (r) { r.innerHTML = String(resultsHtml()); safe(fitBadges); } }
   paintHero();
   if (SH) paintSheet();
 }
@@ -468,9 +538,9 @@ async function locate({pan = false} = {}) {
 }
 
 // ---------- filter sheet ----------
-function optBtn(g, v, label, n, on) {
+function optBtn(g, v, label, n, on, ic = '') {
   const off = !n && !on;
-  return h`<button class="fd-opt" data-act="fdOpt" data-arg="${g + '|' + v}" aria-pressed="${on ? 'true' : 'false'}"${off ? N.raw(' aria-disabled="true"') : ''}><span class="fd-op">${label}<span class="fd-n">${n}</span></span></button>`;
+  return h`<button class="fd-opt" data-act="fdOpt" data-arg="${g + '|' + v}" aria-pressed="${on ? 'true' : 'false'}"${off ? N.raw(' aria-disabled="true"') : ''}><span class="fd-op">${ic ? icon(ic, 'fd-ost') : ''}<span class="fd-ol">${label}</span><span class="fd-n">${n}</span></span></button>`;
 }
 function facet(g, keyFn) {
   const base = (R ? R.base : []).filter(m => pass(m, S, g));
@@ -513,7 +583,7 @@ function sheetBody() {
       const need = on ? S.attrs : [...S.attrs, k];
       return optBtn('attrs', k, l, ab.filter(m => need.every(x => m.feat[x])).length, on);
     });
-    out.push(sec('Rating and features', [optBtn('top', '1', h`${icon('star-filled', 'fd-ost')}Rated 4.5+`, topN, S.top), ...feats]));
+    out.push(sec('Rating and features', [optBtn('top', '1', 'Rated 4.5+', topN, S.top, 'star-filled'), ...feats]));
   }
   // cuisine
   const cAll = allValues(m => m.cuisine);
@@ -560,6 +630,84 @@ function paintSheet(focusArg) {
     if (f) f.focus({preventScroll: true});
   }
 }
+// ---------- touch drags (filter sheet, map preview) ----------
+// One finger. The axis is picked after 8px and take() says whether the drag is ours; from then on the page doesn't
+// scroll and move() follows the finger 1:1. end() gets the speed in px/ms, zero if the finger rested before lifting.
+const SETTLE = 'transform .28s var(--ease),opacity .28s var(--ease)';
+function drag(el, {begin = () => true, hold = () => false, take, move, end}) {
+  let g = null, quiet = 0;
+  const at = ev => ev.touches[0] || ev.changedTouches[0];
+  const down = ev => {
+    g = null;
+    if (ev.touches.length !== 1 || !begin(ev)) return;
+    const p = at(ev);
+    g = {x0: p.clientX, y0: p.clientY, dx: 0, dy: 0, vx: 0, vy: 0, t: performance.now(), axis: '', on: false, target: ev.target};
+  };
+  const mv = ev => {
+    if (!g) return;
+    if (ev.touches.length !== 1) { if (g.on) end(g, true); g = null; return; }
+    const p = at(ev), dx = p.clientX - g.x0, dy = p.clientY - g.y0;
+    if (!g.axis) {
+      if (Math.hypot(dx, dy) < 8) { if (hold(g, dx, dy)) ev.preventDefault(); return; }
+      g.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      g.on = take(g, dx, dy);
+      if (!g.on) { g = null; return; }
+    }
+    if (ev.cancelable) ev.preventDefault();
+    const now = performance.now(), dt = Math.max(1, now - g.t);
+    g.vx = .7 * (dx - g.dx) / dt + .3 * g.vx; g.vy = .7 * (dy - g.dy) / dt + .3 * g.vy;
+    g.dx = dx; g.dy = dy; g.t = now;
+    move(g);
+  };
+  const up = ev => {
+    const d = g;
+    g = null;
+    if (!d || !d.on) return;
+    if (performance.now() - d.t > 80) d.vx = d.vy = 0;
+    quiet = performance.now() + 400;
+    end(d, ev.type === 'touchcancel');
+  };
+  // a drag that lifts over a link or a button must not also press it
+  const click = ev => { if (performance.now() < quiet) { ev.preventDefault(); ev.stopPropagation(); } };
+  const opt = {passive: false};
+  el.addEventListener('touchstart', down, {passive: true});
+  el.addEventListener('touchmove', mv, opt);
+  el.addEventListener('touchend', up);
+  el.addEventListener('touchcancel', up);
+  el.addEventListener('click', click, true);
+  return () => {
+    el.removeEventListener('touchstart', down, {passive: true});
+    el.removeEventListener('touchmove', mv, opt);
+    el.removeEventListener('touchend', up);
+    el.removeEventListener('touchcancel', up);
+    el.removeEventListener('click', click, true);
+  };
+}
+// Pull the sheet down from its head, or from the list once it's scrolled to the top. Let go past 40% or with a flick to close.
+function sheetDrag(el) {
+  const panel = N.$('.fd-panel', el), scrim = N.$('.fd-scrim', el), body = N.$('.fd-pb', el);
+  if (!panel || !scrim || !body) return () => {};
+  const inBody = g => body.contains(g.target);
+  let hgt = 1;
+  return drag(panel, {
+    begin: ev => !body.contains(ev.target) || body.scrollTop <= 0,
+    hold: (g, dx, dy) => inBody(g) && dy > 0 && dy >= Math.abs(dx),
+    take: (g, dx, dy) => { hgt = panel.offsetHeight || 1; return g.axis === 'y' && dy > 0; },
+    move: g => {
+      const y = Math.max(0, g.dy);
+      panel.style.transition = scrim.style.transition = 'none';
+      panel.style.transform = `translateY(${y}px)`;
+      scrim.style.opacity = String(1 - y / hgt);
+    },
+    end: (g, cancel) => {
+      const y = Math.max(0, g.dy);
+      if (!cancel && (g.vy > .5 || y > hgt * .4)) { closeSheet(); return; }
+      panel.style.transition = SETTLE; scrim.style.transition = '';
+      panel.style.transform = ''; scrim.style.opacity = '';
+      setTimeout(() => { if (!panel.style.transform) panel.style.transition = ''; }, 300);
+    },
+  });
+}
 function openSheet() {
   if (SH || !V) return;
   if (!R) compute();
@@ -587,7 +735,8 @@ function openSheet() {
     }
   };
   document.addEventListener('keydown', onKey);
-  SH.off = () => document.removeEventListener('keydown', onKey);
+  const offDrag = sheetDrag(el);
+  SH.off = () => { document.removeEventListener('keydown', onKey); offDrag(); };
   requestAnimationFrame(() => { el.classList.add('on'); const x = N.$('.fd-x', el); if (x) x.focus({preventScroll: true}); });
 }
 function closeSheet(quiet = false) {
@@ -598,7 +747,14 @@ function closeSheet(quiet = false) {
   if (V && V.view) V.view.inert = false;
   const nv = N.$('.nv'); if (nv) nv.inert = false;
   if (quiet || N.reduce) el.remove();
-  else { el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
+  else {
+    // from wherever a drag left it
+    const panel = N.$('.fd-panel', el), scrim = N.$('.fd-scrim', el);
+    if (panel) { panel.style.transition = ''; panel.style.transform = ''; }
+    if (scrim) { scrim.style.transition = ''; scrim.style.opacity = ''; }
+    el.classList.remove('on');
+    setTimeout(() => el.remove(), 300);
+  }
   if (!quiet) {
     const f = prev && prev.isConnected ? prev : $v('.fd-fbtn');
     if (f) f.focus({preventScroll: true});
@@ -623,6 +779,7 @@ function mapShell() {
     <div class="fd-mtop">${searchRow()}<div class="fd-chips" data-hscroll data-fdchips>${chipsHtml()}</div></div>
     <div class="fd-mmsg" data-fdmmsg hidden></div>
     <div class="fd-mbot">
+      <p class="fd-moff" data-fdmoff hidden></p>
       <div class="fd-mrow" data-fdmrow>
         <div class="seg fd-seg" role="group" aria-label="View">
           <button data-act="fdView" data-arg="list" aria-pressed="false">${icon('layout-list')}List</button>
@@ -646,7 +803,8 @@ function openMap() {
   if (!R) compute();
   wrap.innerHTML = String(mapShell());
   view.appendChild(wrap);
-  const my = MV = {wrap, box: N.$('.fd-mapc', wrap), map: null, L: null, markers: new Map(), sel: null, base: [], tiles: null, me: null, hotel: null, offs: [], fitKey: ''};
+  const my = MV = {wrap, box: N.$('.fd-mapc', wrap), map: null, L: null, markers: new Map(), clusters: [], sel: null, base: [], tiles: null, me: null, hotel: null, offs: [], fitKey: ''};
+  my.offs.push(previewDrag(N.$('[data-fdprev]', wrap)));
   const strip = N.$('#strip');
   const setTop = () => wrap.style.setProperty('--fd-strip', `${strip && strip.offsetHeight || 0}px`);
   setTop();
@@ -662,6 +820,7 @@ function openMap() {
 }
 function mapFail() {
   if (!MV) return;
+  MV.wrap.classList.add('fd-mfail');   // fit and locate act on the map, so they go with it
   const ld = N.$('[data-fdmload]', MV.wrap); if (ld) ld.hidden = true;
   const m = N.$('[data-fdmmsg]', MV.wrap);
   if (!m) return;
@@ -672,11 +831,11 @@ function mapFail() {
 function buildMap(L) {
   const my = MV;
   my.L = L;
+  // the map stops a little past the outermost pins, so a fling can't lose the city
   const pts = model().filter(m => m.ll).map(m => [m.lat, m.lon]);
-  const bounds = L.latLngBounds(NYC);
-  pts.forEach(p => bounds.extend(p));
+  const fence = pts.length ? L.latLngBounds(pts).pad(.4) : L.latLngBounds(NYC);
   const map = my.map = L.map(my.box, {zoomControl: false, attributionControl: false, zoomSnap: .25, zoomDelta: .5, minZoom: 10, maxZoom: 18,
-    maxBounds: bounds.pad(.15), maxBoundsViscosity: .8, keyboard: true, inertia: true});
+    maxBounds: fence, maxBoundsViscosity: 1, keyboard: true, inertia: true});
   const pane = map.createPane('fdBase');
   pane.style.zIndex = 150;
   pane.style.pointerEvents = 'none';
@@ -691,7 +850,7 @@ function buildMap(L) {
   map.on('zoomend', onZoom);
   onZoom();
   const ld = N.$('[data-fdmload]', my.wrap); if (ld) ld.hidden = true;
-  getBasemap().then(gj => { if (MV === my && gj) drawBase(gj); });
+  getBasemap().then(gj => { if (MV !== my) return; if (gj) drawBase(gj); else noBase(); });
   syncMap();
   if (keep && keep.sel && BYID.has(keep.sel)) select(keep.sel, {pan: false});
   memo = null;
@@ -721,6 +880,13 @@ function drawBase(gj) {
   const a = N.$('[data-fdattr]', MV.wrap);
   if (a) a.textContent = [src, MV.tiles ? '© OpenStreetMap © CARTO' : ''].filter(Boolean).join(' · ');
 }
+// without data/basemap.json the pins still sit in the right places; show plain land instead of an empty sea and say why
+function noBase() {
+  if (!MV || MV.tiles) return;
+  MV.wrap.classList.add('fd-nobase');
+  const a = N.$('[data-fdattr]', MV.wrap);
+  if (a) a.textContent = 'Street map didn’t load. Pins still work.';
+}
 function restyleMap() {
   if (!MV || !MV.map) return;
   if (MV.base.length) { const st = baseStyles(); MV.base.forEach(([k, l]) => l.setStyle(st[k])); }
@@ -728,17 +894,20 @@ function restyleMap() {
 }
 function onZoom() {
   if (!MV || !MV.map) return;
-  const z = MV.map.getZoom();
-  MV.wrap.classList.toggle('fd-zc', z < 13.75);
+  cluster();
   if (MV.base.length) { const st = baseStyles(); MV.base.forEach(([k, l]) => { if (k !== 'area') l.setStyle(st[k]); }); }
 }
-const pinHtml = m => String(h`<span class="fd-pv" style="${tone(m.kind.tone)}">${icon(m.kind.icon)}${m.rating != null ? h`<b>${m.rating.toFixed(1)}</b>` : ''}</span>`);
+// one pin style: an ink dot with the food's icon, ringed when open; the picked one opens into a pill with its rating
+const pinHtml = m => String(h`<span class="fd-pv">${icon(m.kind.icon)}${m.rating != null ? h`<b>${m.rating.toFixed(1)}</b>` : ''}</span>`);
 function syncMap() {
   if (!MV) return;
-  const c = N.$('[data-fdmcount]', MV.wrap);
+  const c = N.$('[data-fdmcount]', MV.wrap), o = N.$('[data-fdmoff]', MV.wrap);
   if (R && c) {
+    // the pill only has room for the count; spots with no location get their own line so the note is never cut off
     const on = R.list.filter(m => m.ll).length, off = R.list.length - on;
-    c.textContent = R.list.length ? `${N.plural(on, 'spot')}${off ? ` · ${off} not on map` : ''}` : 'No spots';
+    c.innerHTML = String(R.list.length ? h`<b>${on}</b><span class="fd-mu1">${on === 1 ? 'spot' : 'spots'}</span>` : 'No spots');
+    c.setAttribute('aria-label', R.list.length ? N.plural(on, 'spot') : 'No spots');
+    if (o) { o.hidden = !off; o.textContent = off ? `${N.plural(off, 'spot has', 'spots have')} no map location. Find ${off === 1 ? 'it' : 'them'} in the list.` : ''; }
   }
   const msg = N.$('[data-fdmmsg]', MV.wrap);
   if (msg && MV.map) {
@@ -766,6 +935,7 @@ function syncMap() {
     if (el) el.classList.toggle('on', id === MV.sel);
   }
   if (MV.sel && !want.has(MV.sel)) select(null);
+  else cluster();
   // where I am, and the hotel when it has a position
   const here = R.here;
   if (here && hasLL(here) && !R.far) {
@@ -779,6 +949,79 @@ function syncMap() {
       icon: L.divIcon({className: 'fd-hpin', html: String(h`<span>${icon('bed')}</span>`), iconSize: [0, 0], iconAnchor: [0, 0]})}).addTo(map);
     else MV.hotel.setLatLng([ho.lat, ho.lon]);
   } else if (MV.hotel) { MV.hotel.remove(); MV.hotel = null; }
+}
+// Below street zoom, pins closer than a bubble's width fold into one ink bubble with a count; tapping it zooms to them.
+// Closer in, only pins that would sit on top of each other still fold, until street level where every pin shows.
+// Grid cells on the projected map, then any two groups still touching are merged. The picked pin always stays itself.
+const CLUSTER_Z = 14, CELL = 48, TIGHT = 36, ALL_Z = 17;
+function cluster() {
+  if (!MV || !MV.map) return;
+  const {L, map} = MV;
+  MV.clusters.forEach(c => c.remove());
+  MV.clusters = [];
+  const hide = new Set();
+  const z = map.getZoom(), cell = z < CLUSTER_Z ? CELL : z < ALL_Z ? TIGHT : 0;
+  if (cell) {
+    const cells = new Map();
+    for (const [id, mk] of MV.markers) {
+      if (id === MV.sel) continue;
+      const p = map.project(mk.getLatLng(), z), k = Math.floor(p.x / cell) + ':' + Math.floor(p.y / cell);
+      const g = cells.get(k) || {ids: [], x: 0, y: 0};
+      g.ids.push(id); g.x += p.x; g.y += p.y;
+      cells.set(k, g);
+    }
+    const gs = [...cells.values()].map(g => ({ids: g.ids, x: g.x / g.ids.length, y: g.y / g.ids.length}));
+    for (let a = 0; a < gs.length; a++) {
+      for (let b = a + 1; b < gs.length; b++) {
+        const A = gs[a], B = gs[b];
+        if (Math.hypot(A.x - B.x, A.y - B.y) >= cell) continue;
+        const n = A.ids.length + B.ids.length;
+        A.x = (A.x * A.ids.length + B.x * B.ids.length) / n; A.y = (A.y * A.ids.length + B.y * B.ids.length) / n;
+        A.ids = A.ids.concat(B.ids);
+        gs.splice(b, 1);
+        a = -1;   // A moved, so start over
+        break;
+      }
+    }
+    for (const g of gs) {
+      if (g.ids.length < 2) continue;
+      g.ids.forEach(id => hide.add(id));
+      const n = g.ids.length, ids = g.ids;
+      const c = L.marker(map.unproject([g.x, g.y], z), {keyboard: true, title: `${n} spots, zoom in`, zIndexOffset: 50000,
+        icon: L.divIcon({className: 'fd-clu', html: `<span class="fd-cl"><b>${n}</b></span>`, iconSize: [0, 0], iconAnchor: [0, 0]})});
+      c.on('click', ev => { if (ev && ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent); zoomTo(ids); });
+      c.addTo(map);
+      MV.clusters.push(c);
+    }
+  }
+  for (const [id, mk] of MV.markers) {
+    const on = map.hasLayer(mk);
+    if (hide.has(id)) { if (on) mk.remove(); }
+    else if (!on) mk.addTo(map);
+  }
+  paintPins();
+}
+// a removed marker comes back with a new element, so its classes are set here rather than once
+function paintPins() {
+  if (!MV) return;
+  for (const [id, mk] of MV.markers) {
+    const el = mk.getElement(), m = BYID.get(id);
+    if (!el || !m) continue;
+    el.classList.toggle('on', id === MV.sel);
+    el.classList.toggle('fd-po', isOpen(m));
+  }
+}
+function zoomTo(ids) {
+  if (!MV || !MV.map) return;
+  const {L, map} = MV;
+  const ms = ids.map(id => BYID.get(id)).filter(m => m && m.ll);
+  if (!ms.length) return;
+  const bb = L.latLngBounds(ms.map(m => [m.lat, m.lon]));
+  const {t, b} = pads();
+  const z = map.getBoundsZoom(bb, false, L.point(80, t + b));
+  // a bubble always opens: if its spots already fill the screen, step in on its middle instead
+  if (z >= map.getZoom() + .5) map.fitBounds(bb, {paddingTopLeft: [40, t], paddingBottomRight: [40, b], maxZoom: ALL_Z, animate: !N.reduce});
+  else map.setView(bb.getCenter(), Math.min(ALL_Z, map.getZoom() + 1.5), {animate: !N.reduce});
 }
 function pads() {
   const w = MV.wrap, top = N.$('.fd-mtop', w), bot = N.$('.fd-mbot', w);
@@ -820,8 +1063,8 @@ function previewHtml(m) {
       ${thumb(m, 'fd-pth', 84, 84)}
       <span class="fd-pbd">
         <span class="fd-nm">${m.name}</span>
-        ${rateHtml(m, true)}
-        <span class="fd-st">${stChip(m)}${awayHtml(m)}</span>
+        ${rateHtml(m)}
+        ${metaHtml(m)}
       </span>
       ${icon('chevron-right', 'fd-pch')}
     </a>
@@ -833,11 +1076,10 @@ function select(id, {pan = true} = {}) {
   MV.sel = id && BYID.has(id) ? id : null;
   for (const k of [prev, MV.sel]) {
     const mk = k && MV.markers.get(k);
-    if (!mk) continue;
-    const el = mk.getElement();
-    if (el) el.classList.toggle('on', k === MV.sel);
-    mk.setZIndexOffset(k === MV.sel ? 100000 : 0);
+    if (mk) mk.setZIndexOffset(k === MV.sel ? 100000 : 0);
   }
+  if (prev !== MV.sel) cluster(); else paintPins();
+  MV.wrap.classList.toggle('fd-pvon', !!MV.sel);
   const pw = N.$('[data-fdprev]', MV.wrap), row = N.$('[data-fdmrow]', MV.wrap);
   if (!pw || !row) return;
   if (!MV.sel) { pw.hidden = true; pw.innerHTML = ''; row.hidden = false; return; }
@@ -854,6 +1096,43 @@ function select(id, {pan = true} = {}) {
     if (pt.x < 30) dx = pt.x - 50; else if (pt.x > w - 30) dx = pt.x - (w - 50);
     if (dx || dy) MV.map.panBy([dx, dy], {animate: true});
   }
+}
+// The preview card: swipe it down to close, sideways for the next or previous spot in the list's order.
+function previewDrag(pw) {
+  if (!pw) return () => {};
+  const style = (tr, tf, op) => { pw.style.transition = tr; pw.style.transform = tf; pw.style.opacity = op; };
+  const pins = () => R ? R.list.filter(m => m.ll).map(m => m.id) : [];
+  return drag(pw, {
+    begin: ev => !!(MV && MV.sel) && (ev.touches[0].clientX > 20),   // the left edge is the system's back swipe
+    take: (g, dx, dy) => g.axis === 'y' ? dy > 0 : pins().length > 1,
+    move: g => {
+      pw.classList.add('fd-drag');
+      if (g.axis === 'y') { const y = Math.max(0, g.dy); style('none', `translateY(${y}px)`, String(Math.max(.2, 1 - y / 160))); }
+      else style('none', `translateX(${g.dx}px)`, String(Math.max(.4, 1 - Math.abs(g.dx) / 320)));
+    },
+    end: (g, cancel) => {
+      pw.classList.remove('fd-drag');
+      const id = MV && MV.sel;
+      if (!cancel && id && g.axis === 'y' && (g.dy > 40 || g.vy > .5)) {
+        if (N.reduce) { style('', '', ''); select(null); return; }
+        style(SETTLE, 'translateY(60%)', '0');
+        setTimeout(() => { style('', '', ''); if (MV && MV.sel === id) select(null); }, 200);
+        return;
+      }
+      if (!cancel && id && g.axis === 'x' && (Math.abs(g.dx) > 60 || Math.abs(g.vx) > .5)) {
+        const ids = pins(), k = ids.indexOf(id), dir = g.dx < 0 ? 1 : -1;
+        if (ids.length > 1) {
+          select(ids[(k + dir + ids.length) % ids.length]);
+          if (N.reduce) { style('', '', ''); return; }
+          style('none', `translateX(${dir * 48}px)`, '0');
+          void pw.offsetWidth;
+          style(SETTLE, '', '');
+          return;
+        }
+      }
+      style(N.reduce ? '' : SETTLE, '', '');
+    },
+  });
 }
 function paintMapUi() { if (MV) syncMap(); }
 function closeMap() {
@@ -986,7 +1265,13 @@ N.screen('food', {
     if (S.view === 'map' && hasData()) openMap();
     else if (back && memo.scroll) { const y = memo.scroll; requestAnimationFrame(() => { if (V) view.scrollTop = y; }); }
     if (!MV) memo = null;
-    requestAnimationFrame(() => { if (V) safe(revealChips); });
+    requestAnimationFrame(() => { if (V) { safe(revealChips); safe(fitBadges); } });
+    // tags are fitted to the line, so a rotation or the web font arriving fits them again
+    let fitRaf = 0;
+    const refit = () => { cancelAnimationFrame(fitRaf); fitRaf = requestAnimationFrame(() => { if (V) safe(fitBadges); }); };
+    window.addEventListener('resize', refit);
+    V.offs.push(() => { window.removeEventListener('resize', refit); cancelAnimationFrame(fitRaf); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit, () => {});
     return () => {
       closeSheet(true);
       const to = safe(() => N.route().name, '');
@@ -1025,6 +1310,7 @@ N.screen('food', {
       if (prevStates.get(m.id) === m.hr.state + (m.hr.short || '') + (m.hr.text || '')) continue;
       $$v(`[data-fdst="${CSS.escape(m.id)}"]`).forEach(e => { e.outerHTML = String(stChip(m)); });
     }
+    if (MV) paintPins();
   },
   actions,
 });

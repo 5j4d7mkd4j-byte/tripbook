@@ -7,7 +7,10 @@ const N = window.N = {};
 const D = document, W = window;
 N.cfg = Object.assign({owner: '5j4d7mkd4j-byte', repo: 'tripbook', live: 'live', build: 'dev'}, W.__CFG || {});
 N.debug = !!W.__FIXTURE || /[?&]debug\b/.test(location.search);
-N.reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Follows the system setting live, so turning on Reduce Motion takes effect at once.
+const RM = matchMedia('(prefers-reduced-motion: reduce)');
+N.reduce = RM.matches;
+RM.addEventListener('change', e => { N.reduce = e.matches; });
 
 // ---------- small helpers ----------
 N.$ = (s, r = D) => r.querySelector(s);
@@ -139,7 +142,8 @@ N.lock = async () => {
 // ---------- data ----------
 // trip, guide, food come from the site; status comes from the live branch.
 N.data = {trip: null, guide: null, food: null, status: null};
-N.meta = {status: {fetched_at: null, error: null}, files: {}};
+N.meta = {status: {fetched_at: null, error: null}, files: {},
+  rate: {limit: null, remaining: null, reset: null, via: null, at: null}, poll: null};
 const DATA_CACHE = 'nyc-data';
 const abs = u => new URL(u, location.href).href;
 async function cachedResponse(url) { try { return await (await caches.open(DATA_CACHE)).match(abs(url)) || null; } catch { return null; } }
@@ -150,10 +154,15 @@ const same = (a, b) => {
   for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
   return true;
 };
-const lastBytes = {};
+const lastBytes = {}, oldBytes = {};
+const checkedMs = d => Date.parse(d && d.checked_at) || 0;
 async function accept(name, buf, source) {
-  if (same(lastBytes[name], buf)) return false;
+  if (same(lastBytes[name], buf) || same(oldBytes[name], buf)) return false;
   const doc = await unseal(KEY, buf);
+  // raw.githubusercontent.com can be minutes behind the API: never step back to an older check.
+  // (Unless the one held claims a time well past this phone's clock, so it cannot block every later check.)
+  const held = name === 'status' ? checkedMs(N.data.status) : 0;
+  if (held && held < Date.now() + 5 * 60000 && checkedMs(doc) < held) { oldBytes[name] = buf; return false; }
   lastBytes[name] = buf;
   N.data[name] = doc;
   N.meta.files[name] = {source, at: new Date().toISOString()};
@@ -173,24 +182,60 @@ async function fromNet(name, url, fetcher) {
 }
 const FILES = ['trip', 'guide', 'food'];
 const fileUrl = n => `data/${n}.bin`;
+// A request that never answers (captive Wi-Fi) would hold N.refresh, and with it every later check.
+const within = ms => W.AbortSignal && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined;
 async function getFile(n) {
-  const r = await fetch(`${fileUrl(n)}?b=${Date.now()}`, {cache: 'no-store'});
+  const r = await fetch(`${fileUrl(n)}?b=${Date.now()}`, {cache: 'no-store', signal: within(60000)});
   if (!r.ok) throw new Error(`${n} ${r.status}`);
   return r.arrayBuffer();
 }
 const LIVE_KEY = 'live/status.bin';
-async function getLive() {
-  const {owner, repo, live} = N.cfg;
-  try {
-    const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/status.bin?ref=${live}`,
-      {cache: 'no-cache', headers: {Accept: 'application/vnd.github.raw'}});
-    if (!r.ok) throw new Error('api ' + r.status);
-    return await r.arrayBuffer();
-  } catch (e) {
-    const r = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${live}/status.bin?t=${Date.now()}`, {cache: 'no-store'});
-    if (!r.ok) throw new Error('raw ' + r.status);
-    return r.arrayBuffer();
+// api.github.com is current but allows 60 unauthenticated requests an hour per IP (a 304
+// counts too, so nothing is gained by revalidating), shared by every phone on the same
+// Wi-Fi. Its X-RateLimit headers go in N.meta.rate. With RATE_KEEP or fewer left, or after
+// a 403/429, the app reads raw.githubusercontent.com until the hour resets; raw is
+// CDN-cached for about 5 minutes (query strings are ignored), so it can be behind.
+// apiShare() is what is left of the hour split over what is left of the budget: checks
+// closer together than that read raw instead, so the waits never grow to save requests.
+const RATE_KEEP = 3;
+const apiResting = () => { const m = N.meta.rate; return m.reset > Date.now() && m.remaining != null && m.remaining <= RATE_KEEP; };
+const apiShare = () => {
+  const m = N.meta.rate, left = m.reset - Date.now();
+  return left > 0 && m.remaining != null ? left / Math.max(m.remaining - RATE_KEEP, 1) : 0;
+};
+let lastApi = 0;
+function readRate(r) {
+  const m = N.meta.rate, h = k => r.headers.get(k);
+  if (h('x-ratelimit-limit')) m.limit = +h('x-ratelimit-limit');
+  if (h('x-ratelimit-remaining')) m.remaining = +h('x-ratelimit-remaining');
+  if (h('x-ratelimit-reset')) m.reset = +h('x-ratelimit-reset') * 1000;
+  if (r.status === 403 || r.status === 429) {
+    // Out of requests, or a secondary limit: rest until the reset (or Retry-After, or 10 min).
+    const after = +h('retry-after') || 0;
+    m.remaining = 0;
+    m.reset = Math.max(m.reset > Date.now() ? m.reset : 0, after ? Date.now() + after * 1000 : 0) || Date.now() + 10 * 60000;
   }
+  m.at = new Date().toISOString();
+}
+// force (start, Check now, back online) uses the API whenever it is not resting.
+async function getLive(force) {
+  const {owner, repo, live} = N.cfg;
+  if (!apiResting() && (force || Date.now() - lastApi >= apiShare() - 15000)) {
+    lastApi = Date.now();
+    try {
+      const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/status.bin?ref=${live}`,
+        {cache: 'no-store', headers: {Accept: 'application/vnd.github.raw'}, signal: within(20000)});
+      readRate(r);
+      if (!r.ok) throw new Error('api ' + r.status);
+      const buf = await r.arrayBuffer();
+      N.meta.rate.via = 'api';
+      return buf;
+    } catch {}
+  }
+  const r = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${live}/status.bin?t=${Date.now()}`, {cache: 'no-store', signal: within(20000)});
+  if (!r.ok) throw new Error('raw ' + r.status);
+  N.meta.rate.via = 'raw';
+  return r.arrayBuffer();
 }
 // First paint from what this phone saved, then the network.
 N.loadSaved = async () => {
@@ -208,7 +253,7 @@ N.refresh = (force = false) => {
   const jobs = [];
   if (force || t - lastLive > 25000) {
     lastLive = t;
-    jobs.push(fromNet('status', LIVE_KEY, getLive)
+    jobs.push(fromNet('status', LIVE_KEY, () => getLive(force))
       .then(() => { N.meta.status = {fetched_at: new Date().toISOString(), error: null}; })
       .catch(e => { N.meta.status.error = String(e.message || e); }));
   }
@@ -219,15 +264,49 @@ N.refresh = (force = false) => {
   busy = Promise.all(jobs).finally(() => { busy = null; N.emit('net'); schedule(); });
   return busy;
 };
+// How long to wait before the next status check while the app is on screen:
+//   hot window (3 h before a departure until takeoff): about a minute, timed for half a
+//     minute after the cloud's next check is due (checked_at + run.cadence_s; checked_at
+//     is when that check started and it is published some seconds later), 20-90 s
+//   travel window: 5 min; any other time: 15 min
+// A tight API budget does not stretch the wait: checks closer together than apiShare()
+// read raw instead ('share'). While the API is resting, raw is read and the wait ends
+// just after the reset.
+// → {wait (ms), why: 'hot'|'travel'|'idle', api: 'ok'|'share'|'rest'}
+N.pollPlan = () => {
+  const SEC = 1000, now = Date.now(), m = N.meta.rate;
+  let hot = null, win = null;
+  try { hot = N.hotWindow && N.hotWindow(); win = N.travelWindow && N.travelWindow(); } catch {}
+  let wait, why, api = 'ok';
+  if (hot) {
+    const st = N.data.status, cad = (st && st.run && +st.run.cadence_s || 60) * SEC;
+    const due = Date.parse(st && st.checked_at) + cad + 30 * SEC;
+    wait = Number.isFinite(due) ? ((due - N.now().getTime()) % cad + cad) % cad : 60 * SEC;
+    if (wait < 20 * SEC) wait += cad;
+    wait = Math.min(Math.max(wait, 20 * SEC), 90 * SEC);
+    why = 'hot';
+  } else { wait = (win ? 5 : 15) * 60 * SEC; why = win ? 'travel' : 'idle'; }
+  if (apiResting()) { wait = Math.min(wait, m.reset - now + 2 * SEC); api = 'rest'; }
+  else if (apiShare() - 15 * SEC > wait) api = 'share';
+  return {wait: Math.round(wait), why, api};
+};
 let pollT = 0;
 function schedule() {
   clearTimeout(pollT);
-  if (W.__FIXTURE) return;
-  const fast = N.travelWindow && N.travelWindow();
-  pollT = setTimeout(() => { if (!D.hidden) N.refresh(); else schedule(); }, (fast ? 2 : 10) * 60000);
+  N.meta.poll = null;
+  // Hidden: no timer. Coming back to the screen checks at once (visibilitychange below).
+  if (W.__FIXTURE || D.hidden) return;
+  const p = N.pollPlan();
+  p.wait = Math.max(p.wait, lastLive + 26000 - Date.now());   // past the 25 s throttle
+  p.next = new Date(Date.now() + p.wait).toISOString();
+  N.meta.poll = p;
+  pollT = setTimeout(() => { if (!D.hidden) N.refresh(); }, p.wait);
 }
 N.online = () => navigator.onLine !== false;
-D.addEventListener('visibilitychange', () => { if (!D.hidden) { N.refresh(); tickNow(); } });
+D.addEventListener('visibilitychange', () => {
+  if (D.hidden) { clearTimeout(pollT); N.meta.poll = null; return; }
+  N.refresh(); tickNow();
+});
 W.addEventListener('focus', () => N.refresh());
 W.addEventListener('online', () => { N.emit('net'); N.refresh(true); });
 W.addEventListener('offline', () => N.emit('net'));
@@ -275,14 +354,19 @@ N.route = () => {
   const i = h.indexOf('/');
   return i < 0 ? {name: h, param: null, hash: h} : {name: h.slice(0, i), param: h.slice(i + 1), hash: h};
 };
+// How the next navigation started: 'go' (a link), 'tab', 'back', or null for the
+// browser's own back and forward. Everything but 'go' returns to the old scroll spot.
+let navKind = null;
 N.go = (h, replace = false) => {
   h = String(h).replace(/^#/, '');
-  if (decodeURIComponent(location.hash.slice(1)) === h) return;
+  if (decodeURIComponent(location.hash.slice(1)) === h) { navKind = null; return; }
+  navKind = navKind || 'go';
   if (replace) location.replace('#' + h); else location.hash = h;
 };
 let depth = 0;
 N.back = () => {
   const def = cur && cur.def;
+  navKind = 'back';
   if (depth > 0) { depth -= 2; history.back(); return; }
   N.go(def && def.back || 'today', true);
 };
@@ -310,35 +394,50 @@ function setPill(i) {
 function topbar(def) {
   // Before the trip is unlocked there is nothing to open, so only the wordmark shows.
   if (!N.unlocked()) return N.h`<span style="width:38px"></span><span class="wm">nyc.</span><span style="width:38px"></span>`;
-  const w = N.wallet();
-  const empty = !w.aa_code && !(w.names || []).length;
   const left = def.back
     ? N.h`<button class="tbb" data-act="back" aria-label="Back">${N.icon('arrow-left')}</button>`
     : N.h`<button class="tbb" data-act="menu" aria-label="Menu" aria-expanded="false">${N.icon('menu-2')}</button>`;
   return N.h`${left}<a class="wm" href="#today" aria-label="Today">nyc.</a>
-    <button class="av" data-act="go" data-arg="wallet" aria-label="Wallet">${N.icon('user')}${empty && N.unlocked() ? N.raw('<span class="bdg"></span>') : ''}</button>`;
+    <button class="av" data-act="go" data-arg="wallet" aria-label="Wallet">${N.icon('wallet')}</button>`;
 }
 
 // The thin line under the top bar: offline or old flight data.
+// How old is too old follows how often the cloud checks (cadence, seconds): every minute in
+// the hot window, every 10 minutes on travel days, about hourly otherwise. When the cloud
+// says it is checking less often than that (run.cadence_s) and its next check is not yet
+// 5 min overdue, its word is used, so a minute-old nag never shows for a 10-min check.
 N.fresh = () => {
   const st = N.data.status;
   const at = st && st.checked_at;
   const age = at ? Math.round((N.now() - new Date(at)) / 60000) : null;
   const win = N.travelWindow ? N.travelWindow() : null;
+  const hot = N.hotWindow ? N.hotWindow() : null;
+  const said = st && st.run && [60, 600, 3600].includes(+st.run.cadence_s) ? +st.run.cadence_s : 0;
+  const cadence = Math.max(hot ? 60 : win ? 600 : 3600, age != null && age * 60 <= said + 300 ? said : 0);
   let level = 'fresh';
   if (age == null) level = 'stale';
-  else if (win) level = age > 20 ? 'stale' : age >= 10 ? 'neutral' : 'fresh';
-  else if (age > 360) level = 'stale';
-  return {at, age, level, window: win, text: at ? `Checked ${N.time(at, win === 'ret' ? 'LGA' : 'PHX')}` : 'Not checked yet'};
+  else if (cadence === 60) level = age > 6 ? 'stale' : age > 3 ? 'neutral' : 'fresh';
+  else if (cadence === 600) level = age > 20 ? 'stale' : age >= 10 ? 'neutral' : 'fresh';
+  else if (age > 150) level = 'stale';
+  // Times read where the traveller is: the hot leg's airport (a connection is in Eastern time).
+  const hl = hot && hot.legId && N.leg(hot.legId);
+  return {at, age, level, window: win, hot, cadence,
+    every: cadence === 60 ? 'every minute' : cadence === 600 ? 'every 10 minutes' : 'every hour',
+    text: at ? `Checked ${stamp(at, hl && hl.from || (win === 'ret' ? 'LGA' : 'PHX'))}` : 'Not checked yet'};
 };
+// "2:52p" today, "Sun 2:52p" on an earlier day.
+const stamp = (at, ap) => N.ymd(at, ap) === N.ymd(N.now(), ap) ? N.time(at, ap) : `${N.date(at, ap).split(' ')[0]} ${N.time(at, ap)}`;
+// Only the flight and airport screens carry it; elsewhere flight freshness is noise.
+// A screen can opt in with strip: true or out with strip: false.
+const STRIP_ON = ['today', 'flights', 'flight', 'connect', 'airports', 'airport'];
 function stripHtml(def) {
-  if (def.strip === false || !N.unlocked()) return '';
+  if (!N.unlocked() || def.strip === false || (def.strip !== true && !STRIP_ON.includes(def.name))) return '';
   const f = N.fresh();
   if (!N.online()) {
-    return N.h`<div class="strip" role="status">${N.icon('wifi-off')}<span class="grow">Offline · showing what this phone saved${f.at ? ` (${N.ago(f.at)})` : ''}</span></div>`;
+    return N.h`<div class="strip off" role="status">${N.icon('wifi-off')}<span class="grow ell">Offline · flight status ${f.at ? `from ${N.ago(f.at)}` : 'not loaded'}</span></div>`;
   }
-  if (f.level === 'stale' && f.window) {
-    return N.h`<button class="strip" style="width:100%" data-act="refresh" role="status">${N.icon('refresh')}<span class="grow">Flight info is ${f.age == null ? 'not loaded' : N.ago(f.at)} · tap to check now</span></button>`;
+  if (f.level === 'stale' && (f.window || f.hot)) {
+    return N.h`<button class="strip" style="width:100%" data-act="refresh" role="status">${N.icon('refresh')}<span class="grow ell">${f.at ? `Flight status checked ${N.ago(f.at)}` : 'Flight status not loaded'}</span><b>${f.at ? 'Refresh' : 'Load'}</b></button>`;
   }
   return '';
 }
@@ -378,33 +477,43 @@ function direction(from, to) {
 const anim = (node, kf, o) => node.animate ? node.animate(kf, Object.assign({easing: 'cubic-bezier(.32,.72,0,1)', fill: 'both'}, o)).finished.catch(() => {}) : Promise.resolve();
 
 let navSeq = 0;
+const scrollMem = new Map();
 async function navigate() {
   const route = N.route();
+  const kind = navKind; navKind = null;
   let def = screens[route.name];
   if (!N.unlocked()) def = screens.unlock;
   else if (!def || def.name === 'unlock') { N.go('today', true); return; }
+  if (cur && cur.def.name === cur.route.name) scrollMem.set(cur.route.hash, el.view.scrollTop);
   const seq = ++navSeq;
   const dir = direction(cur, def);
+  // Switching tabs crossfades; opening or leaving a screen also slides a little.
+  const tab = cur && typeof cur.def.nav === 'number' && typeof def.nav === 'number' && !cur.def.back && !def.back;
   closeMenu(true);
   const moving = [el.hero, el.body];
   if (cur && dir && !N.reduce && cur.def !== def) {
-    await Promise.all(moving.map(n => anim(n, [{opacity: 1, transform: 'none'}, {opacity: 0, transform: `translateX(${-18 * dir}px)`}], {duration: 150, easing: 'ease-in'})));
+    await Promise.all(moving.map(n => anim(n, [{opacity: 1}, {opacity: 0}], {duration: 90, easing: 'ease-in'})));
     if (seq !== navSeq) return;
   }
   if (cur && cur.cleanup) { try { cur.cleanup(); } catch (e) { N.report(e, 'cleanup'); } }
   const ctx = ctxFor(def, route);
   const same = cur && cur.def === def;
   const st = el.view.scrollTop;
-  cur = {def, route, ctx, cleanup: null};
+  cur = {def, route, ctx, cleanup: null, at: performance.now()};
   cur.cleanup = paint(def, ctx);
   el.view.scrollTop = same && def.keepScroll ? st : 0;
+  // Screens with keepScroll manage their own return spot.
+  const y = kind !== 'go' && !def.keepScroll && scrollMem.get(route.hash);
+  if (y) { el.view.scrollTop = y; requestAnimationFrame(() => { if (cur && cur.route === route) el.view.scrollTop = y; }); }
   if (dir && !N.reduce && !same) {
-    moving.forEach((n, i) => anim(n, [{opacity: 0, transform: `translateX(${24 * dir}px)`}, {opacity: 1, transform: 'none'}], {duration: 420, delay: i * 50}));
+    const from = tab ? 'none' : `translateX(${12 * dir}px)`;
+    moving.forEach(n => anim(n, [{opacity: 0, transform: from}, {opacity: 1, transform: 'none'}], {duration: 220}));
   }
 }
 
 // Re-render the current screen when data it uses changes; values in [data-k]
-// elements that changed get a short highlight.
+// elements that changed get a short highlight, except in the first 2s on a screen,
+// when fresh data arriving is not news.
 function rerender(why) {
   if (!cur) return;
   const {def} = cur;
@@ -417,6 +526,7 @@ function rerender(why) {
   if (cur.cleanup) { try { cur.cleanup(); } catch (e) { N.report(e, 'cleanup'); } }
   cur.cleanup = paint(def, cur.ctx);
   el.view.scrollTop = st;
+  if (performance.now() - cur.at < 2000) return;
   N.$$('[data-k]', el.view).forEach(e => {
     const o = old.get(e.dataset.k);
     if (o != null && o !== e.textContent) { e.classList.remove('chg'); void e.offsetWidth; e.classList.add('chg'); }
@@ -432,26 +542,28 @@ function tickNow() {
   N.$$('[data-clock]').forEach(e => { e.textContent = N.time(N.now(), e.dataset.clock); });
   if (cur && cur.def.tick) { try { cur.ctx.now = N.now(); cur.def.tick(cur.ctx); } catch (e) { N.report(e, 'tick'); } }
   paintStrip();
+  // A hot window that opens while a 5-15 min wait is pending: plan again now, not after it.
+  const p = N.meta.poll;
+  if (p && p.why !== 'hot' && !busy) { try { if (N.hotWindow()) schedule(); } catch {} }
 }
 
 // ---------- menu ----------
 function menuHtml() {
-  const t = N.data.trip, w = N.wallet(), f = N.fresh();
+  const t = N.data.trip, w = N.wallet();
   const hotel = t && t.hotel;
   const range = t ? `${N.date(t.trip.start + 'T16:00:00Z', 'NYC').replace(/^\w+ /, '')}–${N.date(t.trip.end + 'T16:00:00Z', 'NYC').replace(/^\w+ /, '')}` : '';
   const rows = [
     ['wallet', 'wallet', 'Wallet & seats', w.aa_code ? 'Saved on this phone' : 'Private to you'],
     ['hotel', 'building', 'Hotel', hotel ? hotel.name : 'Not added yet'],
     ['calendar', 'calendar-plus', 'Add to Calendar', 'Flights with alerts'],
-    ['settings', 'settings', 'Settings', 'Theme, leave buffer'],
-    ['data', 'refresh', 'Data & updates', f.at ? f.text : 'Not checked yet'],
+    ['settings', 'settings', 'Settings', 'Theme, alerts, leave buffer'],
+    ['data', 'refresh', 'Data & updates', 'Flight status and offline maps'],
   ];
   return N.h`<div class="mhd"><button class="tbb" data-act="menu" aria-label="Close menu">${N.icon('x')}</button><span class="wm">nyc.</span><span style="width:38px"></span></div>
   <div class="mbody gut">
     <div class="smr row" style="gap:14px"><span class="av" style="width:64px;height:64px;font-size:28px">${N.icon('user')}</span>
       <div><div style="font-size:22px;font-weight:800">${(w.names || [])[0] ? `${w.names[0].split(' ')[0]}’s trip` : 'Your trip'}</div><div class="tn" style="font-size:15px">${t ? `${t.trip.title} · ${range}` : ''}</div></div></div>
     <div style="margin-top:18px">${rows.map(r => N.h`<button class="smr mr" data-act="go" data-arg="${r[0]}"><span class="mi">${N.icon(r[1])}</span><span class="mt">${r[2]}<small>${r[3]}</small></span>${N.icon('chevron-right')}</button>`)}</div>
-    <div class="smr row small" style="margin-top:22px;gap:6px">${N.icon('lock')}Wallet details stay on this phone.</div>
   </div>`;
 }
 function openMenu() {
@@ -469,10 +581,73 @@ function closeMenu(quiet) {
   el.view.removeAttribute('aria-hidden');
   const b = N.$('[data-act="menu"]', el.tb); if (b) { b.setAttribute('aria-expanded', 'false'); if (!quiet) b.focus({preventScroll: true}); }
 }
+// Swipe the menu left, or drag the page peek, to close it. The finger is tracked 1:1;
+// on release a flick or enough travel closes, otherwise it springs back. Horizontal
+// drags never start within 20px of the left edge, which belongs to iOS's back swipe.
+const SETTLE = 'transform .28s var(--ease),opacity .28s var(--ease),border-radius .28s var(--ease),visibility 0s .28s';
+let dragged = 0;
+function menuDrag(node, axis, move, closes, settle) {
+  let g = null;
+  node.addEventListener('pointerdown', ev => {
+    g = el.app.classList.contains('mo') && ev.isPrimary && ev.button < 1 && !(axis === 'x' && ev.clientX < 20)
+      ? {id: ev.pointerId, x: ev.clientX, y: ev.clientY, d: 0, v: 0, t: ev.timeStamp, on: false} : null;
+  });
+  node.addEventListener('pointermove', ev => {
+    if (!g || ev.pointerId !== g.id) return;
+    const dx = ev.clientX - g.x, dy = ev.clientY - g.y;
+    if (!g.on) {
+      if (Math.hypot(dx, dy) < 8) return;
+      if ((Math.abs(dx) > Math.abs(dy)) !== (axis === 'x')) { g = null; return; }
+      g.on = true;
+      try { node.setPointerCapture(ev.pointerId); } catch {}
+      node.style.transition = 'none';
+    }
+    const d = axis === 'x' ? dx : dy, dt = ev.timeStamp - g.t;
+    if (dt > 0) g.v = (d - g.d) / dt;
+    g.d = d; g.t = ev.timeStamp;
+    move(d);
+  });
+  const up = ev => {
+    if (!g || ev.pointerId !== g.id) return;
+    const {on, d, t} = g, v = ev.timeStamp - t > 80 ? 0 : g.v;
+    g = null;
+    if (!on) return;
+    dragged = Date.now();
+    node.style.transition = SETTLE;
+    const shut = ev.type === 'pointerup' && closes(d, v);
+    settle(shut);
+    if (shut) closeMenu();
+    setTimeout(() => { node.style.transition = ''; if (shut) node.style.opacity = node.style.transform = ''; }, 300);
+  };
+  node.addEventListener('pointerup', up);
+  node.addEventListener('pointercancel', up);
+}
+function menuGestures() {
+  menuDrag(el.menu, 'x', d => {
+    const x = d < 0 ? d : d * .2;
+    el.menu.style.transform = `translateX(${x}px)`;
+    el.menu.style.opacity = Math.max(.3, 1 + Math.min(0, x) / 300);
+  }, (d, v) => d < -60 || v < -.5, shut => {
+    if (shut) { el.menu.style.opacity = 0; return; }
+    el.menu.style.transform = el.menu.style.opacity = '';
+  });
+  // Pulling the peek up reveals the page; pulling it down is resisted. Either closes.
+  menuDrag(el.view, 'y', d => {
+    el.view.style.transform = `translateY(calc(100% - 132px - env(safe-area-inset-bottom,0px) + ${d < 0 ? d : d * .35}px))`;
+  }, (d, v) => Math.abs(d) > 40 || Math.abs(v) > .5, () => { el.view.style.transform = ''; });
+}
 
 // ---------- actions ----------
 const GLOBAL = {
-  go: (e, ev, ctx, arg) => { closeMenu(true); N.go(arg); },
+  go: (e, ev, ctx, arg) => {
+    closeMenu(true);
+    if (e.closest('.nv')) {
+      // Tapping the tab you are on goes back to the top.
+      if (cur && cur.route.hash === arg) { el.view.scrollTo({top: 0, behavior: N.reduce ? 'auto' : 'smooth'}); return; }
+      navKind = 'tab';
+    }
+    N.go(arg);
+  },
   back: () => N.back(),
   menu: () => el.app.classList.contains('mo') ? closeMenu() : openMenu(),
   reload: () => location.reload(),
@@ -573,10 +748,20 @@ N.start = async () => {
   el.navWrap = N.$('.nv'); el.nav = N.$('.nvi'); el.pill = N.$('.nvp');
   el.nav.insertAdjacentHTML('beforeend', TABS.map(([r, i, l]) => `<button data-act="go" data-arg="${r}"><svg class="i" aria-hidden="true"><use href="#i-${i}"/></svg>${l}</button>`).join(''));
   N.setTheme(N.theme());
+  // iOS only shows :active pressed states once the page listens for touches.
+  D.addEventListener('touchstart', () => {}, {passive: true});
   D.addEventListener('click', dispatch('click'));
   D.addEventListener('input', dispatch('input'));
   D.addEventListener('change', dispatch('input'));
+  // A drag that just closed or settled the menu must not also count as a tap.
+  el.app.addEventListener('click', ev => { if (Date.now() - dragged < 400) { ev.stopPropagation(); ev.preventDefault(); } }, true);
   el.view.addEventListener('click', ev => { if (el.app.classList.contains('mo')) { ev.stopPropagation(); ev.preventDefault(); closeMenu(); } }, true);
+  menuGestures();
+  // The top bar gets an edge once the page scrolls under it.
+  let scrollFrame = 0;
+  el.view.addEventListener('scroll', () => {
+    if (!scrollFrame) scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; el.view.classList.toggle('scrolled', el.view.scrollTop > 4); });
+  }, {passive: true});
   D.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeMenu(); });
   W.addEventListener('hashchange', () => { depth++; navigate(); });
   N.on('data', rerender);

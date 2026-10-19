@@ -6,6 +6,7 @@ let busy = false;
 
 N.screen('unlock', {
   tone: 'band',
+  nav: false,
   static: true,
   strip: false,
   title: 'Unlock',
@@ -14,26 +15,30 @@ N.screen('unlock', {
       hero: h`<div class="unl-hero">
           <div class="ey">Trip companion</div>
           <div class="dp unl-big">New<br>York</div>
-          <p class="unl-lede">Flights, connections, airports, getting to the hotel, and your food list. Works with no signal once opened.</p>
+          <p class="unl-lede">Flights, connections, airports, the hotel and your food list. Works offline once opened.</p>
         </div>`,
-      body: h`<div class="stack unl">
-          <label class="fld"><span>Trip passphrase</span>
-            <div class="unl-row">
-              <input class="inp" id="unl-pass" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-describedby="unl-msg">
-              <button class="ibtn unl-eye" data-act="peek" aria-label="Show passphrase" aria-pressed="false">${icon('eye')}</button>
-            </div>
-          </label>
-          <div id="unl-msg" class="err" role="alert" hidden></div>
-          <button class="btn" id="unl-go" data-act="unlock" style="width:100%">${icon('lock-open')}Open trip</button>
-          <div class="co plain">${icon('shield-check')}<span>Typed once on this phone. Names, confirmation codes and seats you add later in Wallet stay on this phone only.</span></div>
-        </div>`,
+      body: h`<form class="unl" id="unl-form" novalidate>
+          <input type="text" name="username" autocomplete="username" value="nyc" hidden>
+          <div class="stack">
+            <label class="fld"><span>Trip passphrase</span>
+              <div class="unl-row">
+                <input class="inp" id="unl-pass" name="password" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-describedby="unl-msg">
+                <button type="button" class="ibtn unl-eye" data-act="peek" aria-label="Show passphrase" aria-pressed="false">${icon('eye')}</button>
+              </div>
+            </label>
+            <div id="unl-msg" class="err" role="alert" hidden></div>
+            <button type="submit" class="btn" id="unl-go" style="width:100%">${icon('lock-open')}Open trip</button>
+            <div class="co plain">${icon('shield-check')}<span>Type it once on this phone. Anything you add to Wallet later stays on this phone.</span></div>
+          </div>
+        </form>`,
     };
   },
   mount() {
-    const inp = N.$('#unl-pass');
-    const onKey = ev => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } };
-    inp.addEventListener('keydown', onKey);
-    return () => inp.removeEventListener('keydown', onKey);
+    // A real form, so iOS Keychain offers to fill and save the passphrase.
+    const form = N.$('#unl-form');
+    const onSubmit = ev => { ev.preventDefault(); go(); };
+    form.addEventListener('submit', onSubmit);
+    return () => form.removeEventListener('submit', onSubmit);
   },
   actions: {
     unlock: () => go(),
@@ -48,12 +53,13 @@ N.screen('unlock', {
   },
 });
 
-function say(msg) {
+// bad: the passphrase itself is at fault, so outline the field.
+function say(msg, bad = !!msg) {
   const m = N.$('#unl-msg');
   if (!m) return;
   m.textContent = msg || '';
   m.hidden = !msg;
-  N.$('#unl-pass').classList.toggle('bad', !!msg);
+  N.$('#unl-pass').classList.toggle('bad', bad);
 }
 
 async function go() {
@@ -76,7 +82,8 @@ async function go() {
   }
   btn.removeAttribute('aria-disabled');
   btn.innerHTML = String(h`${icon('lock-open')}Open trip`);
-  say(err ? 'No connection. The first unlock needs internet; after that it works offline.' : 'That passphrase didn’t open the trip. Check the spelling; spaces and capitals don’t matter.');
+  if (!err) say('That passphrase didn’t open the trip. Check the spelling; spaces and capitals don’t matter.');
+  else say(navigator.onLine === false ? 'No connection. The first unlock needs internet; after that it works offline.' : 'Couldn’t load the trip. Try again.', false);
   inp.select();
 }
 })();

@@ -237,7 +237,9 @@ const CUISINE_MAP = {
   'Mexican': ['Mexican'], 'Middle Eastern': ['Middle Eastern'], 'New American': ['New American'], 'Noodles': ['Noodles'],
   'Pancakes': ['Breakfast & Brunch'], 'Pasta Shops': ['Italian'], 'Patisserie/Cake Shop': ['Bakery', 'Desserts'],
   'Peruvian': ['Latin American', 'Peruvian'], 'Pizza': ['Pizza'], 'Ramen': ['Ramen', 'Japanese'], 'Salad': ['Salad'],
-  'Sandwiches': ['Sandwiches'], 'Seafood': ['Seafood'], 'Shanghainese': ['Chinese'], 'Smokehouse': ['Smokehouse'],
+  // Smokehouse: Yelp files smoked-fish appetizing shops (Russ & Daughters) here as well as BBQ, so it says
+  // nothing on its own; Seafood/BBQ arrive from the place's other categories.
+  'Sandwiches': ['Sandwiches'], 'Seafood': ['Seafood'], 'Shanghainese': ['Chinese'], 'Smokehouse': [],
   'Soup': ['Soup'], 'Southern': ['Southern'], 'Spanish': ['Spanish'], 'Steakhouses': ['Steakhouse'],
   'Street Vendors': ['Street Food'], 'Sushi Bars': ['Sushi', 'Japanese'], 'Szechuan': ['Chinese', 'Sichuan'],
   'Tacos': ['Tacos', 'Mexican'], 'Taiwanese': ['Taiwanese'], 'Tapas Bars': ['Spanish'], 'Thai': ['Thai'],
@@ -249,6 +251,10 @@ const CUISINE_MAP = {
   'Venues & Event Spaces': [],
   // Loose spellings the AI pass uses in cuisine_add; folded into the Yelp-derived label.
   'Breakfast': ['Breakfast & Brunch'], 'Brunch': ['Breakfast & Brunch'], 'Juice & Smoothies': ['Juice'],
+  // Regional or umbrella labels that would each make a one-place filter chip beside the label that
+  // already covers them (Northern Chinese next to Chinese, Eastern European next to Ukrainian).
+  'Northern Chinese': ['Chinese'], 'Northern Italian': ['Italian'], 'Neapolitan': ['Pizza', 'Italian'],
+  'Southeast Asian': [], 'Eastern European': [], 'International': [], 'Healthy': [],
 };
 // Clean labels that may also arrive verbatim (e.g. from AI cuisine_add) and map to themselves.
 const CLEAN_CUISINES = new Set(Object.values(CUISINE_MAP).flat());
@@ -588,6 +594,18 @@ const ZIP_HOOD = { 10301: 'St. George', 10023: 'Upper West Side', 10024: 'Upper 
   10011: 'Chelsea', 10014: 'West Village', 10012: 'SoHo', 10013: 'Tribeca', 10002: 'Lower East Side', 10003: 'East Village',
   10009: 'East Village', 10007: 'Tribeca', 10018: 'Midtown West' };
 const BOGUS_HOOD = /^(Uptown|Downtown|Midtown|New York|Aperitivo & Kitchen)$/i;
+// One spelling per neighborhood so the Area filter never shows two chips for one place. Yelp writes
+// "TriBeCa" while the ZIP fallback says "Tribeca"; Yelp pairs "Bowery" with "Lower East Side" (Allen St).
+const HOOD_ALIAS = { 'TriBeCa': 'Tribeca', 'LES': 'Lower East Side', 'Bowery': 'Lower East Side',
+  'UES': 'Upper East Side', 'UWS': 'Upper West Side', 'FiDi': 'Financial District', 'Soho': 'SoHo', 'NoLita': 'Nolita',
+  'Dumbo': 'DUMBO', 'Hells Kitchen': "Hell's Kitchen", 'Meatpacking': 'Meatpacking District' };
+
+// Hand fixes for facts Yelp gets wrong, each backed by the place's own page. Pastrami Queen's Yelp
+// location block is only "New York, NY 10007" (a downtown ZIP); its pin and its reviews put it in the
+// Moynihan Train Hall food hall, so directions go to the Farley Building's street address instead.
+const PLACE_FIXES = {
+  'pastrami-queen-new-york-7': { address: '421 8th Ave, New York, NY 10001', located_in: 'Moynihan Train Hall' },
+};
 
 function findLdBiz(ld) {
   return ld.find((x) => x && x.openingHours && x.address) ||
@@ -629,12 +647,16 @@ function buildPlace(c, biz, page, warn) {
     address = [decode(A.streetAddress).replace(/\s*\n\s*/g, ', '), A.addressLocality, tail].filter(Boolean).join(', ');
   }
   else if (biz?.address && /^\d/.test(biz.address)) address = biz.address.replace(/^\d+ (?=\d)/, '');
+  const fix = PLACE_FIXES[id] || {};
+  if (fix.address) address = fix.address;
+  if (fix.located_in) loc.located_in = fix.located_in;
   if (!address) say(`no street address (lat/lon only)${loc.city ? `; Yelp shows only "${loc.city.line}"` : ''}`);
   const locality = loc.city?.locality || A.addressLocality || (c.city || '').split(',')[0] || null;
   const zip = loc.city?.zip || A.postalCode || null;
   let neighborhood = loc.hoods[0] || null;
   if (!neighborhood && biz?.neighborhood && !BOGUS_HOOD.test(biz.neighborhood)) neighborhood = biz.neighborhood;
   if (!neighborhood && zip && ZIP_HOOD[zip]) neighborhood = ZIP_HOOD[zip];
+  if (neighborhood) neighborhood = HOOD_ALIAS[neighborhood] || neighborhood;
   if (!neighborhood) say('no neighborhood');
   const borough = BOROUGH[locality] || (QUEENS.test(locality || '') ? 'Queens' : locality);
 
@@ -746,7 +768,7 @@ function build() {
 const strOrNull = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const strList = (v) => (Array.isArray(v) ? uniq(v.map((x) => (typeof x === 'string' ? x.trim() : null))) : null);
 const AI_KEYS = new Set(['id', 'summary', 'loved', 'watch', 'order', 'tips', 'vibe', 'wait', 'good_for', 'price_per_person',
-  'style', 'types', 'meals', 'cuisine_add', 'popular']);
+  'style', 'types', 'meals', 'cuisine_add', 'cuisine_drop', 'popular']);
 
 function applyAI(p, ai, say) {
   for (const k of Object.keys(ai)) if (!AI_KEYS.has(k)) say(`ignored unknown AI key "${k}"`);
@@ -757,6 +779,13 @@ function applyAI(p, ai, say) {
   else if (ai.style) say(`AI style "${ai.style}" not in ${STYLES.join('|')}; kept "${p.style}"`);
   const types = strList(ai.types)?.map((t) => t.toLowerCase());
   if (types?.length) p.types = uniq(types);
+  // attrs.outdoor === false is only inferred (JSON-LD omits the feature); when the AI pass found a patio
+  // in the reviews, that firsthand evidence wins and Yelp's flag becomes "unknown" rather than "no", so the
+  // detail screen does not contradict the Outdoor tag.
+  if (p.types.includes('outdoor') && p.attrs.outdoor === false) {
+    delete p.attrs.outdoor;
+    say('outdoor type from reviews overrides inferred attrs.outdoor=false');
+  }
   const meals = strList(ai.meals)?.map((m) => m.toLowerCase());
   if (meals?.length) {
     const bad = meals.filter((m) => !MEALS.includes(m));
@@ -766,6 +795,13 @@ function applyAI(p, ai, say) {
   }
   const add = strList(ai.cuisine_add);
   if (add?.length) p.cuisine = uniq([...p.cuisine, ...cuisineOf(add, { strict: false })]);
+  // A Yelp category that misleads as a filter (Xi'an Famous Foods' "Burgers" are roujiamo).
+  const drop = new Set((strList(ai.cuisine_drop) || []).map((c) => c.toLowerCase()));
+  if (drop.size) {
+    const kept = p.cuisine.filter((c) => !drop.has(c.toLowerCase()));
+    if (kept.length) p.cuisine = kept;
+    else say('cuisine_drop would empty cuisine; ignored');
+  }
   if (Array.isArray(ai.popular) && ai.popular.length) {
     const dishPool = p.popular.filter((x) => x.photo).map((x) => ({ id: x.photo, cap: x.name }));
     // An AI-chosen photo must be one of this place's own photos; anything else would show a
@@ -850,7 +886,20 @@ function applyPrices(p, pr, say) {
   } else if (v) say(`visit mode "${v.mode}" not in ${MODES.join('|')}; dropped`);
 }
 
-const KEY_ORDER = ['id', 'name', 'yelp', 'rating', 'reviews', 'price', 'cuisine', 'style', 'types', 'meals',
+// Yelp shows no $ band for some spots, which hides them whenever a price filter is on. Estimate one from
+// the researched per-person spend (midpoint of lo..hi). Bands were fitted to the 68 places Yelp does
+// price: its $ is rare and noisy, and its $$ runs up to about $55 a head (Bustan, Tiny's), so these
+// cut-offs agree with Yelp on most of them. price_est marks the result so it can be told apart from Yelp's.
+function estimatePrice(p, say) {
+  const s = p.prices?.spend;
+  if (p.price || !s || p.prices.confidence === 'none') return;
+  const mid = (s.lo + s.hi) / 2;
+  p.price = mid < 10 ? '$' : mid < 55 ? '$$' : mid < 100 ? '$$$' : '$$$$';
+  p.price_est = true;
+  say(`price ${p.price} estimated from researched spend $${s.lo}–${s.hi} (Yelp lists none)`);
+}
+
+const KEY_ORDER = ['id', 'name', 'yelp', 'rating', 'reviews', 'price', 'price_est', 'cuisine', 'style', 'types', 'meals',
   'neighborhood', 'borough', 'address', 'located_in', 'lat', 'lon', 'phone', 'website', 'menu', 'hours', 'hours_note',
   'attrs', 'photos', 'summary', 'loved', 'watch', 'order', 'tips', 'vibe', 'wait', 'good_for', 'price_per_person',
   'prices', 'visit', 'popular', 'menu_sections'];
@@ -885,6 +934,7 @@ function merge() {
     if (p.prices) priced.add(id);
   }
   for (const p of base.places) checkAgainstHours(p, (m) => warn.push(`${p.id}: ${m}`));
+  for (const p of base.places) estimatePrice(p, (m) => warn.push(`${p.id}: ${m}`));
 
   const problems = [];
   const places = base.places.map((p) => {

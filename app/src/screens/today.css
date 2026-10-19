@@ -7,10 +7,19 @@
 .td-head .hl{font-size:36px;line-height:1.04;margin-top:6px;overflow-wrap:anywhere}
 .td-head .hl b{display:inline}
 .td-head .sub{flex-wrap:wrap;row-gap:2px;font-size:14px}
-.td-st{flex-wrap:wrap}
+/* Status and meta lines: the dot sits on the first line; parts wrap whole. */
+.td-st{align-items:flex-start;line-height:1.35}
+.td-st>.dot{margin-top:calc(.675em - 4px)}
+/* Each part brings its own leading "·"; the row is shifted left by one separator and
+   clipped, so the separator that would start a wrapped line is hidden and none dangles. */
+.td-mw{display:block;min-width:0;flex:1 1 auto;overflow:hidden}
+.td-mt{display:flex;flex-wrap:wrap;margin-left:-16px}
+.td-mt>span::before{content:'·';display:inline-block;width:16px;text-align:center}
 .td-old{color:var(--rot);font-weight:600}
-.td-src{display:flex;align-items:center;min-height:44px;margin-top:2px;font-size:14px;line-height:1.35;color:var(--mu)}
-.td-src u{text-decoration-color:var(--gh);text-underline-offset:2px}
+/* Status dot by status only: on time --eb, caution --warn, late or cancelled rose. */
+.td .dot.td-dok{background:var(--eb)}
+.td .dot.td-dcau{background:var(--warn)}
+.td .dot.td-dbad{background:var(--ro)}
 
 /* Ticket cards */
 .td-tk{padding:18px 20px}
@@ -35,8 +44,14 @@
 /* Sand plan cards */
 .td-plan{padding:18px 20px}
 .td-planh{display:flex;gap:10px;align-items:flex-start}
-.td-big{font-size:26px;line-height:1.12;font-weight:800;letter-spacing:-.01em;margin-top:4px;overflow-wrap:anywhere}
+.td-big{font-size:26px;line-height:1.12;font-weight:800;letter-spacing:-.01em;margin-top:4px;overflow-wrap:anywhere;text-wrap:balance}
 .td-lv{flex:none;margin-top:2px}
+/* The chip drops under the title so the title keeps the full width. */
+.td-planw{flex-wrap:wrap}
+.td-planw>.grow{flex:1 0 100%;min-width:0}
+.td-planw>.td-lv{order:3;margin-top:10px}
+/* Tight connection: --warn outline, ink text (--warn text is too faint on cream). */
+.chip.td-chipc{background:transparent;border:1.5px solid var(--warn);color:var(--ink)}
 .td-plan .ic,.td-bags .ic,.td-food .ic{flex:none}
 .td-cut{margin:12px 0 0;font-size:15px;font-weight:600;line-height:1.4}
 .td-nw{white-space:nowrap}
@@ -51,15 +66,20 @@
 
 /* Countdown cells */
 .td-cn{margin-top:14px}
-.td .td-cn>div{background:var(--sheet);padding:10px}
-.td-cn small{font-size:13px}
+.td .td-cn>div{display:flex;flex-direction:column;gap:var(--sp-1);background:var(--sheet);padding:10px}
+.td-cn small{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.td .td-cn b{margin-top:0}
 .td-cn span{font-size:13px}
 .td-cn span span{display:inline}
+/* The next deadline is ringed in ink; rose (.w) only when the connection is at risk. */
+.td .td-cn .td-nx{box-shadow:inset 0 0 0 1.5px var(--ink)}
 
 /* Gate card */
 .td-gtop{display:flex;gap:12px;align-items:flex-start}
 .td-glbl{font-size:15px;font-weight:600;margin-top:10px}
 .td-gnum{width:fit-content;max-width:100%;font-size:92px;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:clip}
+/* A long gate value (rare) gets a smaller size and wraps instead of being clipped. */
+.td-gnum.td-glong{font-size:52px;line-height:1.05;white-space:normal;overflow:visible;overflow-wrap:anywhere}
 .td-gnone{font-size:26px;font-weight:800;margin-top:8px}
 .td-seat{flex:none;background:var(--sheet);border-radius:16px;padding:8px 12px;text-align:right;max-width:46%}
 .td-seat small{display:block;font-size:13px;color:var(--mu)}
@@ -78,7 +98,11 @@
 .td-chev{font-size:18px;color:var(--mu);flex:none}
 .td-warn{color:var(--rot);font-weight:600}
 .td-row small .td-warn{font-weight:700}
-.td-ci{background:var(--cr);border-radius:20px;padding:6px 14px}
+.td-ci{display:flex;align-items:center;gap:var(--sp-1);background:var(--cr);border-radius:20px;padding:6px 4px 6px 14px}
+.td-ci>.td-row{flex:1 1 auto}
+.td-x{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;border:0;border-radius:22px;
+  background:transparent;color:var(--mu);font-size:18px;padding:0;cursor:pointer}
+.td-legr .td-st{margin-top:2px}
 
 /* Mini tiles */
 .td-tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -87,6 +111,10 @@
 .td-mini b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:15px;font-weight:800;line-height:1.25;margin-top:4px}
 .td-mini small{display:block;font-size:13px;color:var(--mu);margin-top:3px;line-height:1.3}
 .td-ring{box-shadow:inset 0 0 0 2px var(--ro)}
+.td-cau{box-shadow:inset 0 0 0 2px var(--warn)}
+/* Weather caution: --warn icon, ink words. */
+.td-mini .td-wc{display:flex;align-items:flex-start;gap:var(--sp-1);color:var(--ink);font-weight:600}
+.td-wc .i{font-size:14px;color:var(--warn);flex:none;margin-top:1px}
 .td-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 /* Banners and callouts */
@@ -97,7 +125,9 @@
 .td-flag{display:flex;align-items:center;min-height:44px;text-decoration:none}
 .td-flag>.i:last-child{font-size:18px;flex:none}
 .td-stale{display:flex;align-items:center;width:100%;min-height:44px}
-.td .co{font-size:14px}
+.td .co{font-size:14px;align-items:flex-start}
+/* Icon centred on the first text line (14px × 1.45 line, 18px icon). */
+.td .co>.i{margin-top:1px}
 
 /* Return legs */
 .td-legs{padding:10px 0 4px}
@@ -129,6 +159,9 @@
 .td-sumr b{display:block;font-size:44px;font-weight:800;line-height:1;letter-spacing:-.02em}
 .td-sumr small{display:block;font-size:14px;color:var(--mu);margin-top:4px;max-width:9em}
 .td-btn{margin-top:16px;width:100%}
+.td-route{display:flex;text-decoration:none}
+.td-route>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.td>.td-route{margin-top:var(--sp-3)}
 .td-empty .td-p{color:var(--mu)}
 .td-lnci{padding:4px 0 14px}
 .td-lnci .td-ln{color:var(--ink)}

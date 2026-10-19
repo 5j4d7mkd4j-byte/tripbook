@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Schematic airport maps for the trip guide: PHX Terminal 4, CLT, LGA Terminal B.
 
-Output: guide/maps.json = {CODE: {viewBox, svg, points, notes}}, the `map` object
-of guide.airports.<CODE> in app/CONTRACT.md, plus guide/maps_preview.html (light
-and dark preview with a demo gate pulse; add #points to the URL to see points).
+Output: guide/maps.json = {CODE: {viewBox, svg, points, notes, source}}, the `map`
+object of guide.airports.<CODE> in app/CONTRACT.md (`source` names the official data
+and its date for the app's caption), plus guide/maps_preview.html (light and dark
+preview with a demo gate pulse; add #points to the URL to see points).
 
 The maps are hand-laid schematics, north up, 360 units wide for a 350px card.
 Every concourse is drawn as a straight pier, so the app can place any gate by
@@ -16,10 +17,12 @@ checked against it:
   LGA  maps.laguardiaairport.com   Atrius/LocusLabs venue POIs
   CLT  cltairport.com/shop-dine-and-relax/   POI list embedded in the page
 Downloads are cached in research/airportmaps/ (gitignored); --refresh fetches
-again. Any failed check exits 1 and leaves the existing outputs untouched
-(--draft still writes the preview, to look at the problem).
+again, and a download that fails or no longer holds the terminal's gates is
+reported and skipped, so the build carries on from the cached copy. Any failed
+check exits 1 and leaves the existing outputs untouched (--draft still writes the
+preview, to look at the problem).
 
-  python3 -I tools/maps_build.py [--refresh] [--no-preview] [--draft] [--cache DIR]
+  python3 -I tools/maps_build.py [--refresh] [--no-preview] [--draft] [--cache DIR] [--out DIR]
 
 Standard library only. HTTPS goes through urllib, falling back to curl when the
 local Python has no usable CA bundle (common on macOS framework builds).
@@ -54,7 +57,7 @@ SRC = {
             'origin': (40.7736, -73.8715, 111050)},
 }
 CLASSES = {'m-bg', 'm-wall', 'm-area', 'm-water', 'm-gate', 'm-route', 'm-label', 'm-you', 'm-sec', 'm-food'}
-KINDS = {'gate', 'security', 'food', 'exit', 'bag', 'ride', 'bus', 'taxi', 'info', 'line'}
+KINDS = {'gate', 'security', 'food', 'exit', 'bag', 'ride', 'bus', 'train', 'taxi', 'info', 'line'}
 GATE_RE = re.compile(r'^Gates?\s+([A-Z]?)(\d+)(.?)')
 CLAIM_RE = re.compile(r'^Baggage Claim\s+()(\d+)()$')
 ORDER_TOL = 5.0     # metres a gate may sit "behind" its predecessor along a pier
@@ -62,6 +65,15 @@ SIDE_MIN = 6.0      # metres between the odd and even means needed to call a sid
 MAX_TURN = 70.0     # degrees a drawn pier may deviate from its real compass direction
 FAR = 150.0         # metres apart before two piers' relative position must match
 MIN_TEXT = 9        # smallest font size in viewBox units
+MIN_GATES = 20      # a download with fewer gates on the terminal's floors is not trusted
+# How app/src/screens/airports.js shows map words: it hides the SVG text and redraws
+# each word as an HTML label, 14px when font-size >= 10 and 13px otherwise, bold or
+# large ones from zoom 1 and the rest from zoom 1.4, never cut by the frame. The map
+# box is the card width (335px on the narrowest iPhone, 350px usually) and at most
+# 460px tall; the view can pan 24px past the map's edge.
+APP_W = (335, 350)
+APP_MAX_H = 460
+APP_PAN = 24
 
 
 # ---------------------------------------------------------------- data
@@ -87,14 +99,25 @@ def save(path, data):
     os.replace(tmp, path)
 
 
+def usable(code, pois):
+    """Raise unless a parsed POI list still holds the terminal's gates, so a changed
+    or truncated download never replaces a good cache."""
+    if isinstance(pois, dict):
+        pois = list(pois.values())
+    n = len(real_points(code, pois, 'gate', GATE_RE)) if isinstance(pois, list) else 0
+    if n < MIN_GATES:
+        raise RuntimeError(f"only {n} numbered gates on floors {SRC[code]['floor']}* (expected {MIN_GATES}+)")
+
+
 def refresh(code, cache):
-    """Download one airport's POI list (plus the Atrius manifest for its version)."""
+    """Download one airport's POI list (plus the Atrius manifest for its version).
+    Everything is fetched and checked before anything in the cache is replaced."""
     src, c = SRC[code], code.lower()
     if 'atrius' in src:
         loader = json.loads(fetch(src['atrius'] + '/config.json'))['plugins']['venueDataLoader']
         manifest = fetch(f"https://a.locuslabs.com/accounts/{loader['accountId']}/v5.json")
         pois = fetch(json.loads(manifest)[loader['venueId']]['files']['pois'])
-        json.loads(pois)  # must parse before it replaces the cache
+        usable(code, json.loads(pois))
         save(os.path.join(cache, f'manifest_{c}.json'), manifest)
         save(os.path.join(cache, f'{c}_pois.json'), pois)
     else:
@@ -103,21 +126,34 @@ def refresh(code, cache):
         if not m:
             raise RuntimeError('CLT page has no __NEXT_DATA__ block')
         pois = json.loads(m.group(1))['props']['pageProps']['pois']
+        usable(code, pois)
         save(os.path.join(cache, f'{c}_pois.json'), json.dumps(pois).encode())
 
 
 def load(code, cache):
-    """(POI list, data version YYYY-MM-DD) from the cache."""
+    """(POI list, data version YYYY-MM-DD) from the cache; exits with a hint when
+    there is no usable copy."""
     c = code.lower()
     path = os.path.join(cache, f'{c}_pois.json')
-    with open(path) as f:
-        pois = json.load(f)
+    try:
+        with open(path) as f:
+            pois = json.load(f)
+    except (OSError, ValueError) as e:
+        sys.exit(f'{code}: no usable cached data at {path} ({e.__class__.__name__}); run with --refresh')
     if isinstance(pois, dict):
         pois = list(pois.values())
+    if not isinstance(pois, list):
+        sys.exit(f'{code}: cached data at {path} is not a POI list; run with --refresh')
+    # Atrius manifests are keyed by venue id (phx, lga). The CLT page carries no
+    # version, and a missing manifest falls back the same way: the download date.
+    ver = ''
     if 'atrius' in SRC[code]:
-        with open(os.path.join(cache, f'manifest_{c}.json')) as f:
-            ver = json.load(f)[c]['assetVersion'][:10]
-    else:  # the CLT page carries no version; use the download date
+        try:
+            with open(os.path.join(cache, f'manifest_{c}.json')) as f:
+                ver = str(json.load(f)[c]['assetVersion'])[:10]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', ver):
         ver = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d')
     return pois, ver
 
@@ -133,13 +169,18 @@ def real_points(code, pois, category, pattern):
     Split gates (E14A, "Gates B15A, B15B") fold onto their number; a plain name wins."""
     plain, split = {}, {}
     for p in pois:
-        pos = p.get('position') or {}
-        if p.get('category') != category or not str(pos.get('floorId', '')).startswith(SRC[code]['floor']):
+        pos = p.get('position') if isinstance(p, dict) else None
+        if not isinstance(pos, dict) or p.get('category') != category \
+                or not str(pos.get('floorId', '')).startswith(SRC[code]['floor']):
             continue
-        m = pattern.match(p.get('name') or '')
-        if m:
+        m = pattern.match(str(p.get('name') or ''))
+        try:
+            xy = project(code, float(pos['latitude']), float(pos['longitude']))
+        except (KeyError, TypeError, ValueError):
+            continue   # no usable position: it cannot be checked against the layout
+        if m and all(map(math.isfinite, xy)):
             bucket = split if m.group(3).isalnum() else plain
-            bucket.setdefault((m.group(1), int(m.group(2))), []).append(project(code, pos['latitude'], pos['longitude']))
+            bucket.setdefault((m.group(1), int(m.group(2))), []).append(xy)
     out = {}
     for key in set(plain) | set(split):
         pts = plain.get(key) or split[key]
@@ -191,10 +232,12 @@ class Map:
         self.code, self.w, self.h = code, w, h
         self.layers = {k: [] for k in self.LAYERS}
         self.texts = []      # (x0, y0, x1, y1, s, cls): estimated text boxes for the lint
+        self.words = []      # (x, y, s, size, anchor, weight): words the app redraws as labels
         self.walls = []      # m-wall rect boxes, which gate labels must clear
         self.lines = []      # concourse (and carousel) specs, resolved in build()
         self.later = []      # points placed beside a gate, resolved once sides are known
         self.points, self.notes, self.food_at = {}, [], set()
+        self.source = ''     # the official data and its date, for the app's caption
 
     # shapes
     def rect(self, cls, x, y, w, h, rx=0):
@@ -213,10 +256,13 @@ class Map:
         nx, ny = -(y2 - y1) * k, (x2 - x1) * k
         self.poly(cls, [(x1 + nx, y1 + ny), (x2 + nx, y2 + ny), (x2 - nx, y2 - ny), (x1 - nx, y1 - ny)])
 
-    def text(self, x, y, s, size=9, anchor='middle', weight=400, cls='m-label'):
+    def text(self, x, y, s, size=9, anchor='middle', weight=400, cls='m-label', app=True):
+        """A word on the map. app=False for words the app drops (the legend)."""
         w = text_width(s, size, weight)
         x0 = x - w / 2 if anchor == 'middle' else x - w if anchor == 'end' else x
         self.texts.append((x0, y - 0.72 * size, x0 + w, y + 0.2 * size, s, cls))
+        if app and cls != 'm-gate':
+            self.words.append((x, y, s, size, anchor, weight))
         self.layers['text'].append(el('text', dict(cls=cls, x=x, y=y, font_size=size, font_weight=weight,
                                                    text_anchor=anchor), s))
 
@@ -275,8 +321,8 @@ class Map:
             else:
                 a['y1'] = a['y2'] = cy
             self.layers['top'].append(el(tag, a))
-            self.text(x + 15, cy + 3.2, s, 9, 'start')
-        self.text(x, y + 5 * 13 + 4, '↑ N · schematic', 9, 'start')
+            self.text(x + 15, cy + 3.2, s, 9, 'start', app=False)
+        self.text(x, y + 5 * 13 + 4, '↑ N · schematic', 9, 'start', app=False)
 
     # geometry
     @staticmethod
@@ -336,7 +382,8 @@ class Map:
                 self.point(pid, x, y, label, kind)
         svg = el('rect', dict(cls='m-bg', x=0, y=0, width=self.w, height=self.h)) + ''.join(
             ''.join(self.layers[k]) for k in self.LAYERS)
-        return dict(viewBox=f'0 0 {self.w} {self.h}', svg=svg, points=self.points, notes=self.notes), errs, report
+        return dict(viewBox=f'0 0 {self.w} {self.h}', svg=svg, points=self.points, notes=self.notes,
+                    source=self.source), errs, report
 
     def draw_gates(self, L, have):
         """A dot per official gate just inside the pier edge, its label just outside."""
@@ -499,7 +546,48 @@ def lint(m, out):
             errs.append(f'{code}: point {pid} kind {p["kind"]!r} or label missing')
         if not (0 <= p['x'] <= m.w and 0 <= p['y'] <= m.h):
             errs.append(f'{code}: point {pid} outside the map')
-    return errs
+    if not m.source:
+        errs.append(f'{code}: no source')
+    return errs + app_fit(m, out['points'])
+
+
+def app_fit(m, points):
+    """Map words as the app draws them (see APP_W): a bold or large word must fit
+    whole in the frame at zoom 1 and clear the other zoom-1 words, or the app hides
+    it; a plain word (zoom 1.4 up) must fit inside the map plus the pan margin."""
+    errs, zoom1 = [], {}
+    icons = [(p['x'], p['y']) for pid, p in points.items() if p['kind'] not in ('gate', 'line') and pid != 'hub']
+    for x, y, s, size, anchor, weight in m.words:
+        px = 14 if size >= 10 else 13
+        wpx, hpx = 0.6 * px * len(s) + 2, 1.15 * px
+        first = 1.0 if size >= 10 or weight >= 600 else 1.4
+        cy = y - 0.35 * size
+        for W in APP_W:
+            H = min(W * m.h / m.w, APP_MAX_H)
+            k = min(W / m.w, H / m.h) * first
+            half = wpx / 2 / k
+            mid = x + half if anchor == 'start' else x - half if anchor == 'end' else x
+            # The app skips a word that sits on a place's icon (that bubble names it).
+            if not s.isdigit() and any(math.hypot(px_ - mid, py_ - cy) < 14 for px_, py_ in icons):
+                break
+            box = (mid - half, cy - hpx / 2 / k, mid + half, cy + hpx / 2 / k)
+            if first == 1.0:
+                vw, vh = W / k, H / k
+                frame = (m.w / 2 - vw / 2, m.h / 2 - vh / 2, m.w / 2 + vw / 2, m.h / 2 + vh / 2)
+                zoom1.setdefault(W, []).append((box, s, 3 / k))
+            else:
+                pan = APP_PAN / k
+                frame = (-pan, -pan, m.w + pan, m.h + pan)
+            if box[0] < frame[0] - 2 / k or box[1] < frame[1] - 2 / k or box[2] > frame[2] + 2 / k \
+                    or box[3] > frame[3] + 2 / k:
+                errs.append(f'{m.code}: app label {s!r} is cut by the frame at {W}px, so the app hides it')
+                break
+    for W, words in zoom1.items():
+        for i, (a, s, pad) in enumerate(words):
+            for b, t, _ in words[i + 1:]:
+                if overlap(a, b, -pad):
+                    errs.append(f'{m.code}: app labels {s!r} and {t!r} collide at {W}px zoom 1; one is hidden')
+    return sorted(set(errs), key=errs.index)
 
 
 # ---------------------------------------------------------------- layouts
@@ -554,7 +642,7 @@ def phx(ver):
     m.point('ride', 150, 334, 'Rideshare pickup, Level 1 outer curb: Door 1 (north, far west) or Doors 2, 6, 8 (south)',
             'ride')
     m.point('taxi', 198, 334, 'Taxis, Level 1: Door 7 (north) or Door 4 (south)', 'taxi')
-    m.point('skytrain', 178, 353, 'PHX Sky Train T4 station, Level 3 (free, 24/7)', 'bus')
+    m.point('skytrain', 178, 353, 'PHX Sky Train T4 station, Level 3 (free, 24/7)', 'train')
     m.food('dunkin', 208, 266, "Dunkin', Level 3 before security (24 hours)")
     m.at_gate('olive_a4', 'a1', 4, 'Olive & Ivy near A4 (from 4 a.m.)', 'food')
     m.at_gate('blanco_a5', 'a1', 5, 'Blanco Tacos near A5 (from 4 a.m.)', 'food')
@@ -568,8 +656,8 @@ def phx(ver):
     m.at_gate('club_a7', 'a1', 8, 'Admirals Club above A7/A9', 'info')
     m.at_gate('club_a19', 'a2', 20, 'Admirals Club between A19 and A21', 'info')
     m.at_gate('club_b5', 'b1', 6, 'Admirals Club above B5/B7', 'info')
+    m.source = f'Sky Harbor official map data ({ver}), drawn north up'
     m.notes = [
-        f'Schematic, not to scale, north up. Gates and their order come from the Sky Harbor official map data ({ver}).',
         'American checks in on Level 2 at the north curb, Doors 21 and 23 (Door 23 for wheelchairs and mobility devices).',
         'Checkpoint A is open 24 hours and is closest to the A gates. B 4:15 a.m.-8:30 p.m., C 3:15 a.m.-12:30 a.m., '
         'D 3:15 a.m.-7:30 p.m.',
@@ -601,7 +689,7 @@ def clt(ver):
     m.rect('m-wall', 262, 334, 96, 12)        # Concourse D, east
     m.rect('m-wall', 242, 48, 14, 262)        # Concourse E, north
     m.rect('m-wall', 249, 186, 108, 12)       # E10-19 branch, east
-    m.rect('m-wall', 192, 42, 116, 12)        # E36-45 around the far end
+    m.rect('m-wall', 191, 42, 129, 12)        # E36-45 round the far end
     m.rect('m-area', 140, 268, 82, 62, 4)     # landside: ticketing upper, claim lower
     m.sec('sec_1', 151, 330, 14, 13, '1', 'Security Checkpoint 1 (west)')
     m.sec('sec_2', 198, 330, 14, 13, '2', 'Security Checkpoint 2 (centre)')
@@ -621,14 +709,16 @@ def clt(ver):
            header=(237, 532, 'C2–19'), walk=[5, 9])
     m.line('d', 'D', 1, 13, (266, 340), (354, 340), fmt='num', hw=6, via=[hub, (222, 357), (232, 340), (266, 340)],
            header=(310, 316, 'D1–13'), walk=[2, 4])
-    m.line('e1', 'E', 1, 9, (249, 298), (249, 218), via=to_e((249, 298)), walk=[3, 5])
+    m.line('e1', 'E', 1, 9, (249, 298), (249, 218), via=to_e((249, 298)), header=(222, 262, 'E1–9', 'end'),
+           walk=[3, 5])
     m.line('e2', 'E', 10, 19, (262, 192), (352, 192), fmt='num', hw=6, via=to_e((249, 192), (262, 192)),
-           header=(306, 168, 'E10–19'), walk=[6, 8])
-    m.line('e3', 'E', 20, 32, (249, 174), (249, 76), via=to_e((249, 174)), walk=[6, 9])
-    # E36-45 curl round the far end, so their odd/even sides are not consistent;
-    # all labels go above the bar, clear of the spine.
-    m.line('e4', 'E', 36, 45, (200, 48), (300, 48), side='left', fmt='num', hw=6, via=to_e((249, 48)),
-           header=(314, 52, 'E36–45', 'start'), walk=[6, 9])
+           header=(318, 168, 'E10–19'), walk=[6, 8])
+    m.line('e3', 'E', 20, 32, (249, 174), (249, 76), via=to_e((249, 174)), header=(222, 128, 'E20–32', 'end'),
+           walk=[6, 9])
+    # E36-45 curl round the far end, so odd/even sides are not consistent there:
+    # labels alternate above and below, spaced so the E spine falls between 39 and 41.
+    m.line('e4', 'E', 36, 45, (199, 48), (311.5, 48), side='alt', fmt='num', hw=6, via=to_e((249, 48)),
+           header=(187, 52, 'E36–45', 'end'), walk=[6, 9])
 
     m.text(184, 368, 'Atrium', 9)
     m.text(181, 284, 'Terminal', 10, weight=700)
@@ -659,8 +749,8 @@ def clt(ver):
     m.at_gate('club_b', 'b', 3.5, 'Admirals Club, Concourse B (near B3/B4)', 'info')
     m.at_gate('provisions_a1', 'a1', 1, 'Provisions by Admirals Club near A1', 'info')
     m.point('club_cd', 214, 349, 'Admirals Club, upper level by the C/D entrance', 'info')
+    m.source = f'CLT official airport website data (fetched {ver}), drawn north up'
     m.notes = [
-        f'Schematic, not to scale, north up. Gates and their order come from the CLT official map data (fetched {ver}).',
         'No train at CLT: every concourse connects airside through the Atrium, so a connection never needs re-screening.',
         'Moving walkways run on Concourse A (toward A North), the A/B connector, the D/E connector and Concourse E. '
         'Concourse B has none.',
@@ -685,15 +775,15 @@ def lga(ver):
     m.rect('m-wall', 153, 170, 14, 124)      # pedestrian bridge over the taxiway (opened 2022)
     m.rect('m-wall', 64, 292, 204, 30)       # Level 4 food hall, airside
     m.rect('m-wall', 266, 298, 36, 12)       # bridge to the Eastern Concourse
-    m.rect('m-wall', 300, 196, 18, 104)      # Eastern Concourse, north arm
-    m.rect('m-wall', 300, 288, 38, 34)       # Eastern Concourse, elbow
+    m.rect('m-wall', 296, 196, 26, 104)      # Eastern Concourse, north arm
+    m.rect('m-wall', 296, 288, 42, 34)       # Eastern Concourse, elbow
     m.rect('m-wall', 320, 300, 18, 152)      # Eastern Concourse, south-east arm
     m.rect('m-area', 64, 325, 204, 28)       # Level 3 departures
     m.rect('m-area', 64, 356, 204, 48)       # Level 2 arrivals and bag claim
     m.rect('m-area', 64, 407, 204, 14)       # Level 2 curb
     m.rect('m-area', 64, 424, 204, 14)       # Level 1 curb
     m.rect('m-area', 8, 330, 50, 108, 3)     # Terminal B garage, west
-    m.sec('sec', 137, 329, 28, 16, 'TSA', 'Security checkpoint, Level 3 (TSA PreCheck; no CLEAR in Terminal B)')
+    m.sec('sec', 141, 329, 28, 16, 'TSA', 'Security checkpoint, Level 3 (TSA PreCheck; no CLEAR in Terminal B)')
 
     w = dict(side='left', hw=0, walk=[4, 6])
     m.line('w1', '', 11, 17, (146, 170), (18, 170), via=[hub, (160, 170), (146, 170)], **w)
@@ -701,21 +791,20 @@ def lga(ver):
     m.line('w3', '', 24, 27, (166, 46), (226, 46), via=[hub, (160, 170), (166, 46)], **w)
     m.line('w4', '', 28, 31, (231.7, 60.9), (203.6, 157.6), via=[hub, (160, 170), (203.6, 157.6)], **w)
     e = dict(side='left', hw=3, walk=[6, 9])
-    m.line('e1', '', 40, 44, (303, 284), (303, 206), via=[hub, (303, 304), (303, 284)], **e)
-    m.line('e2', '', 45, 47, (315, 206), (315, 262), via=[hub, (315, 304), (315, 262)], **e)
+    m.line('e1', '', 40, 44, (300, 284), (300, 206), via=[hub, (300, 304), (300, 284)], **e)
+    m.line('e2', '', 45, 47, (318, 206), (318, 262), via=[hub, (318, 304), (318, 262)], **e)
     m.line('e3', '', 48, 53, (335, 330), (335, 446), via=[hub, (335, 304), (335, 330)], **e)
     m.line('e4', '', 54, 57, (323, 446), (323, 340), via=[hub, (323, 304), (323, 340)], **e)
     m.line('e5', '', 58, 59, (306, 316), (314, 316), show=False, via=[hub, (306, 304), (306, 316)], **e)
-    m.text(297, 320, '58–59', 9, 'end', cls='m-gate')
+    m.text(293, 320, '58–59', 9, 'end', cls='m-gate')
     m.line('claim', '', 1, 9, (104, 375), (259, 375), side='left', kind='baggage', label='Baggage carousels 1–9, Level 2',
            via=[hub, (230, 304), (230, 375)])
 
     m.text(80, 100, 'Western Concourse', 11, weight=700)
     m.text(80, 114, 'Gates 11–31 · American', 9)
-    m.text(148, 232, 'Bridge over', 9, 'end')
-    m.text(148, 243, 'taxiway', 9, 'end')
-    m.text(309, 180, 'Eastern Concourse', 9, weight=700)
-    m.text(309, 192, 'Gates 40–59', 9)
+    m.text(174, 236, 'Bridge over taxiway', 9, 'start')
+    m.text(354, 180, 'Eastern Concourse', 9, 'end', 700)
+    m.text(354, 192, 'Gates 40–59', 9, 'end')
     m.text(68, 314, 'L4 Food hall', 9, 'start')
     m.text(236, 315, 'Exit', 9, 'start')
     m.text(68, 342, 'L3', 9, 'start', 700)
@@ -758,12 +847,11 @@ def lga(ver):
     m.at_gate('melt_shop', 'w2', 23, 'Melt Shop near gate 23', 'food', inset=-10)
     m.at_gate('bar_veloce', 'w3', 24, 'Bar Veloce near gate 24', 'food', inset=-10)
     m.at_gate('beechers', 'w4', 30, "Beecher's near gate 30", 'food', inset=-10)
-    m.at_gate('shake_shack', 'e1', 41, 'Shake Shack near gate 41', 'food', inset=-3)
-    m.at_gate('la_chula', 'e1', 42, 'La Chula near gate 42', 'food', inset=-3)
-    m.at_gate('il_viaggio', 'e2', 47, 'Il Viaggio near gate 47', 'food', inset=-3)
+    m.at_gate('shake_shack', 'e1', 41, 'Shake Shack near gate 41', 'food', inset=-5)
+    m.at_gate('la_chula', 'e1', 42, 'La Chula near gate 42', 'food', inset=-5)
+    m.at_gate('il_viaggio', 'e2', 47, 'Il Viaggio near gate 47', 'food', inset=-5)
+    m.source = f'LaGuardia official map data ({ver}), drawn north up'
     m.notes = [
-        f'Schematic, not to scale, north up. Gates, carousels and curb stops come from the LaGuardia official map data '
-        f'({ver}).',
         'There is no AirTrain (canceled in March 2023). Ground options are taxi, rideshare, buses and shuttles.',
         'American uses the Western Concourse, gates 11-31, a 4-6 min walk from security. The Eastern Concourse '
         '(gates 40-59) is 6-9 min.',
@@ -810,6 +898,7 @@ text{paint-order:stroke;stroke:var(--bg);stroke-width:2.2px;stroke-linejoin:roun
 .dbg circle{fill:none;stroke:#d0f;stroke-width:1}.dbg line{stroke:#d0f;stroke-width:.8}.dbg text{font-size:6px;fill:#d0f;stroke:none}
 </style></head><body>
 <div id="out"></div>
+<!-- #PHX shows one airport; #points (or #PHX,points) overlays the points on the light card. -->
 <script>
 const MAPS = __DATA__;
 // Demo: the gates the app would highlight (PHX departure, CLT B-to-B connection, LGA arrival and carousel).
@@ -858,8 +947,11 @@ function debug(map, svg) {
     add(g, 'text', {x: p.x + 4, y: p.y - 3}).textContent = id;
   }
 }
+const opts = location.hash.slice(1).split(',');
+const only = opts.find(o => MAPS[o]);
 const out = document.getElementById('out');
 for (const [code, map] of Object.entries(MAPS)) {
+  if (only && code !== only) continue;
   const row = document.createElement('div');
   row.innerHTML = `<h2>${code}</h2><div class="row"></div>`;
   const r = row.querySelector('.row');
@@ -870,11 +962,13 @@ for (const [code, map] of Object.entries(MAPS)) {
     r.appendChild(card);
     const svg = card.querySelector('svg');
     demo(code, map, svg);
-    if (theme === 'light' && location.hash === '#points') debug(map, svg);
+    if (theme === 'light' && opts.includes('points')) debug(map, svg);
   }
   const notes = document.createElement('div');
   notes.className = 'notes';
-  notes.innerHTML = '<ul>' + map.notes.map(n => `<li>${n.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</li>`).join('') + '</ul>';
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  notes.innerHTML = '<ul>' + map.notes.map(n => `<li>${esc(n)}</li>`).join('') + '</ul>' +
+    (map.source ? `<p>Source: ${esc(map.source)}.</p>` : '');
   r.appendChild(notes);
   out.appendChild(row);
 }
@@ -895,14 +989,19 @@ def main():
     ap.add_argument('--no-preview', action='store_true', help='skip guide/maps_preview.html')
     ap.add_argument('--draft', action='store_true', help='write the preview even when checks fail')
     ap.add_argument('--cache', default=CACHE, help='cache directory for the official data')
+    ap.add_argument('--out', help='write maps.json and maps_preview.html here instead of guide/ (for tests)')
     args = ap.parse_args()
+    out_json = os.path.join(args.out, 'maps.json') if args.out else OUT
+    out_preview = os.path.join(args.out, 'maps_preview.html') if args.out else PREVIEW
     os.makedirs(args.cache, exist_ok=True)
     if args.refresh:
         for code in SRC:
             try:
                 refresh(code, args.cache)
-            except Exception as e:  # noqa: BLE001 - report and stop; the old cache stays
-                sys.exit(f'{code}: {e}')
+                print(f'{code}: downloaded the official data')
+            except Exception as e:  # noqa: BLE001 - any failure keeps the cached copy
+                print(f'WARN {code}: refresh failed, building from the cached data ({e.__class__.__name__}: {e})',
+                      file=sys.stderr)
 
     maps, errors = {}, []
     for code, layout in (('PHX', phx), ('CLT', clt), ('LGA', lga)):
@@ -919,14 +1018,15 @@ def main():
             print('  ' + line)
 
     if not args.no_preview and (args.draft or not errors):
-        write_atomic(PREVIEW, PREVIEW_HTML.replace('__DATA__', json.dumps(maps, ensure_ascii=False).replace('</', '<\\/')))
-        print('wrote', os.path.relpath(PREVIEW, ROOT))
+        write_atomic(out_preview, PREVIEW_HTML.replace('__DATA__',
+                                                       json.dumps(maps, ensure_ascii=False).replace('</', '<\\/')))
+        print('wrote', out_preview if args.out else os.path.relpath(PREVIEW, ROOT))
     if errors:
         for e in errors:
             print('FAIL', e, file=sys.stderr)
         sys.exit(1)
-    write_atomic(OUT, json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
-    print('wrote', os.path.relpath(OUT, ROOT), '- all checks passed')
+    write_atomic(out_json, json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
+    print('wrote', out_json if args.out else os.path.relpath(OUT, ROOT), '- all checks passed')
 
 
 if __name__ == '__main__':

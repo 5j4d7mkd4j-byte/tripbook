@@ -1,0 +1,23 @@
+/* N.route: MTA route bullets and the station labels N.route.draw() puts on a map */
+.rt-b{position:relative;display:inline-grid;place-items:center;flex:none;box-sizing:border-box;width:1.5em;height:1.5em;border-radius:50%;
+  background:var(--rb,#7C858C);color:var(--rt,#FFF);font-weight:700;font-size:.8em;line-height:1;letter-spacing:-.02em;vertical-align:-.35em;
+  font-variant-numeric:tabular-nums}
+.rt-b>span{position:relative}
+.rt-bw{width:auto;min-width:1.5em;padding:0 .42em;border-radius:.75em;font-size:.72em;height:1.66em}
+.rt-bd{background:none}
+.rt-bd::before{content:"";position:absolute;inset:.22em;border-radius:.12em;background:var(--rb,#7C858C);transform:rotate(45deg)}
+.rt-bs{display:inline-flex;align-items:center;gap:3px;vertical-align:middle}
+
+/* map labels: Leaflet divIcons with a zero-size anchor, the pill sits beside the station dot */
+.rt-lblw{background:none;border:0}
+.rt-lbl{position:absolute;left:11px;top:0;transform:translateY(-50%);display:inline-flex;align-items:center;gap:5px;max-width:190px;
+  padding:3px 9px 3px 3px;border-radius:999px;background:var(--sheet);color:var(--ink);font-size:12px;font-weight:650;line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 4px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.1)}
+.rt-lbl .rt-b{font-size:13px;vertical-align:0}
+.rt-lbl-l{left:auto;right:11px}
+.rt-lbl-ur,.rt-lbl-ul{top:auto;bottom:8px;transform:none}
+.rt-lbl-dr,.rt-lbl-dl{top:8px;transform:none}
+.rt-lbl-ur,.rt-lbl-dr{left:6px}
+.rt-lbl-ul,.rt-lbl-dl{left:auto;right:6px}
+.rt-lbl-t{padding:4px 9px}
+.rt-ln{overflow:hidden;text-overflow:ellipsis;min-width:0}

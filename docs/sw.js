@@ -5,11 +5,11 @@
      stored as normal, measurable entries rather than opaque ones).
    - Trip files and flight status are NOT handled here: core.js fetches them
      itself and keeps its own copy in the "nyc-data" cache. */
-const BUILD = "b363d119c0";
+const BUILD = "8fac47accb";
 const SHELL = 'nyc-shell-' + BUILD;
 const TILES = 'nyc-tiles', PHOTOS = 'nyc-photos';
 const LIMIT = {[TILES]: 3000, [PHOTOS]: 1600};
-const PRECACHE = ["./","manifest.webmanifest","data/basemap.json","fonts/figtree.woff2","fonts/inter.woff2","fonts/intertight.woff2","icons/apple-touch-icon.png","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png","vendor/leaflet/images/layers-2x.png","vendor/leaflet/images/layers.png","vendor/leaflet/images/marker-icon-2x.png","vendor/leaflet/images/marker-icon.png","vendor/leaflet/images/marker-shadow.png","vendor/leaflet/leaflet.css","vendor/leaflet/leaflet.js"];
+const PRECACHE = ["./","manifest.webmanifest","data/basemap.json","data/subway.json","data/walk.json","fonts/figtree.woff2","fonts/inter.woff2","fonts/intertight.woff2","icons/apple-touch-icon.png","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png","vendor/leaflet/images/layers-2x.png","vendor/leaflet/images/layers.png","vendor/leaflet/images/marker-icon-2x.png","vendor/leaflet/images/marker-icon.png","vendor/leaflet/images/marker-shadow.png","vendor/leaflet/leaflet.css","vendor/leaflet/leaflet.js"];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {
@@ -128,3 +128,40 @@ async function usage(client) {
   try { est = await navigator.storage.estimate(); } catch {}
   client && client.postMessage({type: 'usage', counts: out, usage: est && est.usage, quota: est && est.quota});
 }
+
+// ---------- lock-screen alerts ----------
+// The updater pushes {v, title, body, url, tag, at}; url is an in-app route like
+// "#flight/<id>". Every push must show a notification: iPhone ends the
+// subscription of a web app that receives pushes without showing one.
+self.addEventListener('push', e => {
+  let m = {};
+  try { m = e.data ? e.data.json() : {}; } catch { m = {body: e.data ? e.data.text() : ''}; }
+  if (!m || typeof m !== 'object') m = {body: typeof m === 'string' ? m : ''};   // JSON null, a number, a bare string
+  const opts = {
+    body: String(m.body || 'Something changed with your flights.'),
+    icon: 'icons/icon-192.png',
+    // The sender turns a bad route into a bare "#", which would only open Today.
+    data: {url: typeof m.url === 'string' && m.url.length > 1 && m.url.startsWith('#') ? m.url : '#flights'},
+  };
+  // A newer alert with the same tag replaces the old one and still makes a sound.
+  if (m.tag) { opts.tag = String(m.tag); opts.renotify = true; }
+  if (m.at && !isNaN(Date.parse(m.at))) opts.timestamp = Date.parse(m.at);
+  e.waitUntil(self.registration.showNotification(String(m.title || 'nyc.'), opts));
+});
+
+// Tapping an alert opens the app on the route it names: an open window is
+// focused and told where to go, otherwise a new one opens there.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '#flights';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+    const c = all.find(w => w.url.startsWith(self.registration.scope));
+    if (c) {
+      await c.focus().catch(() => {});
+      c.postMessage({type: 'open', url});
+      return;
+    }
+    await self.clients.openWindow(self.registration.scope + url);
+  })());
+});

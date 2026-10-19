@@ -1,0 +1,46 @@
+/* Lock-screen alerts (#alerts). Built on the Settings styles in wallet.css (.wl-*). */
+.wl-al .al-steps{list-style:none;margin:0}
+.wl-al .al-steps .rw small{margin-top:1px}
+.wl-al .al-st small{text-wrap:pretty}
+
+/* status */
+.wl-al .al-st .rw small{margin-top:3px}
+.wl-al .al-st.ok .ic{color:var(--ok)}
+.wl-al .al-st.bad .ic{color:var(--rot)}
+.wl-al .al-st.warn .ic{color:var(--warn)}
+.wl-al .al-again{margin-top:var(--sp-3)}
+.wl-al .al-st+.wl-link{margin-top:var(--sp-1)}
+
+/* code */
+.wl-al .al-code{background:var(--cr);border-radius:18px;padding:14px 16px;font:500 13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--mu)}
+.wl-al .al-code span{overflow-wrap:anywhere;word-break:break-all;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden}
+/* opened in full when the clipboard is refused, so the whole code can be selected by hand */
+.wl-al .al-code span.all{display:block;-webkit-line-clamp:none;line-clamp:none}
+.wl-al .al-code ::selection{background:var(--pill);color:var(--pillt)}
+.wl-al .al-btns{display:flex;gap:var(--sp-2)}
+.wl-al .al-btns .btn{flex:1;min-width:0;padding:0 12px}
+.wl-al .al-btns .i{font-size:19px}
+
+/* what's sent */
+.wl-al .al-kinds li .i{color:var(--eb)}
+
+/* one-time card on Flights */
+.fl .bn.al-nudge{margin-bottom:6px}
+.fl .bn.al-nudge>.i{color:var(--eb)}
+.fl .bn.al-nudge b{text-wrap:balance}
+.fl .bn.al-nudge span{line-height:1.35;margin-top:2px;text-wrap:pretty}
+.fl .bn.al-nudge .bx{gap:8px}
+.fl .bn.al-nudge .bx .fl-btn.al-go{background:var(--ink);color:var(--page)}
+
+/* Alerts row in Settings */
+.wl .al-row{text-decoration:none;color:var(--ink);padding:12px 10px 12px 14px;min-height:68px}
+.wl .al-row>.i{font-size:18px;color:var(--mu);flex:none}
+.wl .al-w{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--mu);flex:none}
+.wl .al-w::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--mu)}
+.wl .al-w.on{color:var(--ink)}
+.wl .al-w.on::before{background:var(--ok)}
+.wl .al-w.waiting::before{background:var(--eb)}
+.wl .al-w.stopped{color:var(--rot)}
+.wl .al-w.stopped::before{background:var(--ro)}
+.wl .al-w.off::before{display:none}

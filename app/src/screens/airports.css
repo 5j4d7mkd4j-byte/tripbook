@@ -5,22 +5,26 @@
 .ap-hero{position:relative;padding-top:4px;min-height:236px}
 .ap-hero .ap-ps{position:relative;z-index:1}
 .ap-hero .ap-ps button{height:44px;min-width:58px;padding:0 15px;border-radius:22px;justify-content:center;gap:6px;font-size:15px;letter-spacing:.02em}
-.ap-hero .ap-nd{width:7px;height:7px;border-radius:50%;background:var(--ro);flex:none}
-.ap-hero .ap-ps button[aria-pressed="true"] .ap-nd{background:var(--rot)}
+/* The "now" dot: band text colour on the band, band green on the selected pill. */
+.ap-hero .ap-nd{width:7px;height:7px;border-radius:50%;background:var(--obt);flex:none}
+.ap-hero .ap-ps button[aria-pressed="true"] .ap-nd{background:var(--eb)}
 .ap-hero .ap-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .ap-hero .ap-top{position:relative;z-index:1;margin-top:18px}
 .ap-hero .ap-ey{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ap-hero .ap-code{font-size:104px;margin:10px 0 0 -4px;color:var(--ob);letter-spacing:-.035em}
-.ap-hero .ap-sub{margin:12px 0 0;max-width:72%;color:var(--ob)}
-.ap-hero .ap-sub b{display:block;font-size:16px;font-weight:700;line-height:1.3}
-.ap-hero .ap-sub span{font-size:13px;font-weight:600;opacity:.88}
-.ap-hero .ap-sub>span{display:block;margin-top:3px}
-.ap-hero .ap-il{right:-6px;top:78px;width:128px;height:138px}
+/* Body text on the band uses --obt: white (--ob) is under 4.5:1 on the light band. */
+.ap-hero .ap-sub{margin:12px 0 0;color:var(--obt)}
+.ap-hero .ap-sub b{display:block;font-size:16px;font-weight:700;line-height:1.3;text-wrap:balance}
+.ap-hero .ap-sub>span{display:block;margin-top:3px;font-size:13px;font-weight:600}
+.ap-hero .ap-sub .ap-nw{white-space:nowrap}
+/* The art sits beside the code and ends above the subtitle. */
+.ap-hero .ap-il{right:0;top:90px;width:28%;max-width:108px;height:auto;aspect-ratio:14/15}
 .ap-hero.ap-e{min-height:0}
 .ap-hero.ap-e .hl{color:var(--ob)}
 
 /* ---------- body: shared bits ---------- */
-.ap-pg .ap-anc{scroll-margin-top:76px}
+/* Sections land just under the pinned jump bar (8px bar padding x2 + 44px chip + 8px). */
+.ap-pg .ap-anc{scroll-margin-top:calc(var(--ap-jt,calc(56px + env(safe-area-inset-top,0px))) + 68px)}
 .ap-pg .ap-note{margin:0 0 10px;font-size:13px;color:var(--mu);line-height:1.4}
 .ap-pg .ap-subh{margin:18px 0 4px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mu)}
 .ap-pg .ap-sh{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;min-width:0}
@@ -29,6 +33,22 @@
 .ap-pg .ap-c44{height:44px;border-radius:22px;padding:0 16px;font-size:14px}
 .ap-pg .ap-ml{margin-top:12px}
 .ap-pg .ap-chev{font-size:20px;color:var(--mu);flex:none;align-self:center}
+/* Amber ring: worth a look, not a problem (rose stays for risk). */
+.ap-pg .chip.ap-cw{box-shadow:inset 0 0 0 1.5px var(--warn)}
+.ap-pg .chip.ap-cw .i{color:var(--warn)}
+/* Reference sections start closed: a cream row with the title, a short note and a chevron. */
+.ap-pg .ap-fold>summary,.ap-pg .ap-more>summary{display:flex;align-items:center;list-style:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ap-pg .ap-fold>summary::-webkit-details-marker,.ap-pg .ap-more>summary::-webkit-details-marker{display:none}
+.ap-pg .ap-fold>summary{gap:12px;min-height:56px;padding:10px 16px;border-radius:20px;background:var(--cr)}
+.ap-pg .ap-fold>summary .ey{display:block}
+.ap-pg .ap-fold>summary small{display:block;font-size:13px;color:var(--mu);font-weight:600;margin-top:3px;line-height:1.35}
+.ap-pg .ap-fb{padding-top:14px}
+.ap-pg .ap-more{margin-top:10px}
+.ap-pg .ap-more>summary{gap:10px;min-height:44px;padding:0 14px;border-radius:14px;box-shadow:inset 0 0 0 1.5px var(--ln);font-size:14px;font-weight:700;color:var(--ink)}
+.ap-pg .ap-mb{padding-top:10px}
+.ap-pg details>summary .ap-chev{transition:transform .2s}
+.ap-pg details[open]>summary .ap-chev{transform:rotate(180deg)}
+@media (prefers-reduced-motion:reduce){.ap-pg details>summary .ap-chev{transition:none}}
 .ap-pg .ic .i{font-size:20px}
 
 /* visit switch */
@@ -36,9 +56,13 @@
 .ap-pg .ap-seg button{flex:1;height:44px;border-radius:20px;justify-content:center;font-size:14px;white-space:nowrap;padding:0 8px}
 
 /* tiles */
-.ap-pg .ap-cn b{font-size:18px}
-.ap-pg .ap-chk{margin:8px 2px 0;font-size:13px;color:var(--mu)}
+/* One line each; amber dot = worth a look, rose ring (.w) = a real problem. */
+.ap-pg .ap-cn span{font-size:13px;margin-top:2px}
+.ap-pg .ap-cn .ap-cw span{color:var(--ink)}
+.ap-pg .ap-cn .ap-cw span::before{content:'';display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--warn);vertical-align:1px}
 .ap-pg .ap-cos{margin-top:14px}
+/* A tight (not at-risk) connection: sand callout with an amber edge; rose is kept for "At risk". */
+.ap-pg .co.ap-tight{box-shadow:inset 0 0 0 2px var(--warn)}
 .ap-pg .co .ap-il2{display:flex;align-items:center;width:fit-content;min-height:44px;margin-top:8px;padding:0 16px;border-radius:22px;
   background:var(--sheet);color:var(--ink);text-decoration:none;font-weight:700;font-size:14px}
 
@@ -51,10 +75,18 @@
 .ap-pg .ap-fl .chip.cr{background:var(--sheet)}
 
 /* jump row */
-.ap-pg .ap-jump{display:flex;gap:8px;overflow-x:auto;margin:20px -20px 0;padding:0 20px 2px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+/* Pins under the top bar (--ap-jt, set on mount); the chip for the section in view is filled ink. */
+.ap-pg .ap-jump{position:sticky;top:var(--ap-jt,calc(56px + env(safe-area-inset-top,0px)));z-index:6;display:flex;gap:8px;overflow-x:auto;
+  margin:12px calc(-1 * max(20px,env(safe-area-inset-right,0px))) 0 calc(-1 * max(20px,env(safe-area-inset-left,0px)));
+  padding:8px max(20px,env(safe-area-inset-right,0px)) 8px max(20px,env(safe-area-inset-left,0px));
+  background:var(--sheet);scrollbar-width:none;-webkit-overflow-scrolling:touch;transition:box-shadow .2s}
+.ap-pg .ap-jump.stuck{box-shadow:0 1px 0 var(--ln)}
 .ap-pg .ap-jump::-webkit-scrollbar{display:none}
+.ap-pg .ap-ng{margin-top:16px}
 .ap-pg .ap-j{display:inline-flex;align-items:center;gap:6px;flex:none;height:44px;padding:0 15px;border-radius:22px;background:var(--cr);color:var(--ink);font-size:14px;font-weight:700}
 .ap-pg .ap-j .i{font-size:17px;color:var(--eb)}
+.ap-pg .ap-j[aria-current="true"]{background:var(--ink);color:var(--page)}
+.ap-pg .ap-j[aria-current="true"] .i{color:var(--page)}
 
 /* ---------- steps ---------- */
 .ap-pg .ap-steps{list-style:none;margin:0;padding:0}
@@ -69,34 +101,56 @@
 .ap-pg .ap-sb small{display:block;font-size:13px;color:var(--mu);margin-top:3px;line-height:1.4}
 .ap-pg .ap-sb .ap-x{color:var(--ink);font-weight:600}
 .ap-pg .ap-mn{display:flex!important;align-items:center;gap:5px}
-.ap-pg .ap-in{display:inline-block;margin-top:4px;font-size:13px;font-weight:800;color:var(--rot)}
-.ap-pg .ap-st.done .ap-tm,.ap-pg .ap-st.done .ap-sb b{color:var(--mu)}
-.ap-pg .ap-st.done .ap-si{background:var(--eb);color:var(--sheet)}
-.ap-pg .ap-st.done .ap-sd::before{background:var(--eb);opacity:.5}
-.ap-pg .ap-st.next .ap-si{background:var(--ro);color:var(--rog);box-shadow:0 0 0 4px var(--rob)}
-.ap-pg .ap-st.next .ap-tm{color:var(--rot)}
+.ap-pg .ap-in{display:inline-block;margin-top:4px;font-size:13px;font-weight:800;color:var(--eb)}
+.ap-pg .ap-sl{margin-top:10px;width:fit-content}
+/* Finished steps: one quiet 44px line (time, tick, title). */
+.ap-pg .ap-st.done{min-height:44px}
+.ap-pg .ap-st.done .ap-tm{padding-top:12px;font-size:13px;font-weight:700;color:var(--mu)}
+.ap-pg .ap-st.done .ap-si{width:28px;height:28px;margin:8px 0 0 3px;font-size:15px;background:var(--eb);color:var(--sheet)}
+.ap-pg .ap-st.done .ap-sd::before{top:40px;bottom:0;background:var(--eb);opacity:.5}
+.ap-pg .ap-st.done .ap-sb{padding:12px 0 8px}
+.ap-pg .ap-st.done .ap-sb b{font-size:14px;font-weight:700;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The step in progress or next: band green, never rose (rose means risk). */
+.ap-pg .ap-st.next .ap-si{background:var(--eb);color:var(--sheet);box-shadow:0 0 0 4px var(--cr)}
+.ap-pg .ap-st.next .ap-tm{color:var(--eb)}
 .ap-pg .ap-st.wn .ap-si{background:var(--sd);color:var(--sdt)}
 
 /* ---------- terminal map ---------- */
+.ap-pg .ap-mw{position:relative}
 .ap-pg .ap-mv{--ap-ground:var(--cr);--ap-hall:var(--sheet);--ap-edge:var(--gh);
-  position:relative;width:100%;min-height:240px;max-height:460px;border-radius:22px;overflow:hidden;background:var(--ap-ground);
+  position:relative;width:100%;min-height:240px;max-height:360px;border-radius:22px;overflow:hidden;background:var(--ap-ground);
   touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab;outline-offset:3px}
-.ap-pg .ap-mv.zoomed{box-shadow:inset 0 0 0 2px var(--eb)}
+/* Dark theme: a darker ground and lighter halls so the corridors read (tokens only). */
+@supports (color:light-dark(currentcolor,currentcolor)){.ap-pg .ap-mv{--ap-ground:light-dark(var(--cr),var(--page));--ap-hall:light-dark(var(--sheet),var(--tile))}}
+.ap-pg .ap-mw.zoomed .ap-mv{box-shadow:inset 0 0 0 2px var(--eb)}
+/* Zoomed, the map keeps every drag; Done gives the page its swipes back. */
+.ap-pg .ap-done{position:absolute;top:12px;right:12px;z-index:4;display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 18px;
+  border-radius:22px;background:var(--ink);color:var(--page);font-size:15px;font-weight:800;box-shadow:0 2px 8px var(--gh);cursor:pointer}
+.ap-pg .ap-done[hidden]{display:none}
+.ap-pg .ap-zc{position:absolute;right:12px;bottom:12px;z-index:4;display:flex;gap:8px;padding:0 4px;border-radius:26px;background:var(--sheet);box-shadow:0 2px 8px var(--gh)}
+.ap-pg .ap-z{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;color:var(--ink);font-size:20px;cursor:pointer}
+.ap-pg .ap-z[disabled]{opacity:.38;cursor:default}
 .ap-pg .ap-mv:active{cursor:grabbing}
 .ap-pg .ap-svg{display:block;width:100%;height:100%}
 .ap-pg .ap-svg .m-bg{fill:var(--ap-ground)}
-.ap-pg .ap-svg .m-wall{stroke:var(--ap-edge);fill:none}
+.ap-pg .ap-svg .m-area,.ap-pg .ap-svg .m-water{fill:var(--eb);fill-opacity:.13}
+.ap-pg .ap-svg .m-wall{fill:var(--ap-hall);stroke:var(--ap-edge);stroke-width:1;vector-effect:non-scaling-stroke}
+.ap-pg .ap-svg .m-wall.ap-open{fill:none;stroke:var(--ap-edge)}
 .ap-pg .ap-svg .m-gate{fill:var(--eb)}
-.ap-pg .ap-svg .m-sec{fill:var(--ink)}
+.ap-pg .ap-svg .m-sec{fill:var(--warn);fill-opacity:.24;stroke:var(--warn);stroke-width:1;vector-effect:non-scaling-stroke}
 .ap-pg .ap-svg .m-food{fill:var(--s3)}
-.ap-pg .ap-svg .m-label{fill:var(--mu);font-weight:800;font-family:Inter,system-ui,sans-serif;letter-spacing:.02em}
-.ap-pg .ap-svg .m-route{fill:none;stroke:var(--eb);stroke-width:3;stroke-dasharray:6 5;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.ap-pg .ap-svg .m-you{fill:var(--ro)}
-.ap-pg .has-rt .m-route{display:none}
+.ap-pg .ap-svg text{display:none}
+.ap-pg .ap-svg .m-route{display:none;fill:none;stroke:var(--eb);stroke-width:3;stroke-dasharray:6 5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+/* The map's own drawn routes: only the one that fits this visit, and only when there is no walk of yours. */
+.ap-pg .ap-mv[data-role="depart"]:not(.has-rt) #route-depart,
+.ap-pg .ap-mv[data-role="arrive"]:not(.has-rt) #route-arrive,
+.ap-pg .ap-mv[data-role="arrive"] #route-taxi,.ap-pg .ap-mv[data-role="arrive"] #route-bus,.ap-pg .ap-mv[data-role="arrive"] #route-ride{display:inline}
+.ap-pg .ap-svg .m-you{fill:var(--ink)}
 .ap-pg .ap-rc{fill:none;stroke:var(--sheet);stroke-width:10;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-.ap-pg .ap-rt{fill:none;stroke:var(--ro);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:12 8;
+.ap-pg .ap-rt{fill:none;stroke:var(--ink);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:12 8;
   vector-effect:non-scaling-stroke;animation:ap-march 1.2s linear infinite}
 @keyframes ap-march{to{stroke-dashoffset:-20}}
+@media (prefers-reduced-motion:reduce){.ap-pg .ap-rt{animation:none}}
 
 /* pins (HTML overlay so text stays sharp and readable at every zoom) */
 .ap-pg .ap-pins{position:absolute;inset:0;pointer-events:none}
@@ -108,8 +162,17 @@
 .ap-pg .ap-you .ap-pl{margin-left:6px;background:var(--ink);color:var(--page);box-shadow:0 2px 8px var(--gh)}
 .ap-pg .ap-you.fl .ap-pi{left:auto;right:-10px;flex-direction:row-reverse}
 .ap-pg .ap-you.fl .ap-pl{margin-left:0;margin-right:6px}
-.ap-pg .ap-dot{position:relative;width:20px;height:20px;border-radius:50%;background:var(--ro);box-shadow:0 0 0 3px var(--sheet),0 2px 8px var(--gh);flex:none}
-.ap-pg .ap-you.you .ap-dot::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--ro);animation:ap-pulse 1.8s cubic-bezier(.2,.6,.4,1) infinite}
+.ap-pg .ap-you.dn .ap-pl,.ap-pg .ap-you.up .ap-pl{position:absolute;left:calc(10px + var(--dx,0px));margin:0}
+.ap-pg .ap-you.dn .ap-pl{top:calc(100% + 4px)}
+.ap-pg .ap-you.up .ap-pl{bottom:calc(100% + 4px)}
+.ap-pg .ap-dot{position:relative;width:20px;height:20px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 3px var(--sheet),0 2px 8px var(--gh);flex:none}
+.ap-pg .ap-you.you .ap-dot::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--ink);animation:ap-pulse 1.8s cubic-bezier(.2,.6,.4,1) infinite}
+/* The gate a link asked for pulses wider so it is the first thing you see. */
+.ap-pg .ap-you.q .ap-dot::after{animation-duration:1.4s}
+@media (prefers-reduced-motion:reduce){.ap-pg .ap-you .ap-dot::after{animation:none;opacity:0}}
+/* The dot under your finger rings at once. */
+.ap-pg .ap-pin.hit .ap-dot,.ap-pg .ap-pin.hit .ap-pb{box-shadow:0 0 0 3px var(--sheet),0 0 0 6px var(--ink)}
+.ap-pg .ap-gn.hit .ap-pi{box-shadow:0 0 0 2px var(--sheet),0 0 0 4px var(--ink)}
 .ap-pg .ap-you.via .ap-dot{background:var(--eb);width:16px;height:16px;margin:0 2px}
 .ap-pg .ap-you.via .ap-pl{background:var(--sheet);color:var(--ink)}
 @keyframes ap-pulse{0%{transform:scale(1);opacity:.55}80%,100%{transform:scale(2.8);opacity:0}}
@@ -117,32 +180,45 @@
 .ap-pg .ap-poi .ap-pi{left:-13px}
 .ap-pg .ap-pb{width:26px;height:26px;border-radius:50%;background:var(--sheet);color:var(--eb);display:flex;align-items:center;justify-content:center;
   font-size:15px;flex:none;box-shadow:0 0 0 1.5px var(--ln),0 1px 4px var(--gh)}
-.ap-pg .ap-poi.k-security .ap-pb{color:var(--rot)}
+.ap-pg .ap-poi.k-security .ap-pb{color:var(--warn)}
 .ap-pg .ap-poi.k-baggage .ap-pb,.ap-pg .ap-poi.k-taxi .ap-pb,.ap-pg .ap-poi.k-bus .ap-pb{color:var(--ink)}
-.ap-pg .ap-poi .ap-pl{display:none;margin-left:4px;background:var(--sheet);color:var(--ink);box-shadow:0 1px 4px var(--gh)}
+.ap-pg .ap-poi .ap-pl{display:none;margin-left:4px;background:var(--sheet);color:var(--ink);box-shadow:0 1px 4px var(--gh);
+  font-size:13px;font-weight:700;letter-spacing:0;text-transform:none;padding:5px 8px}
 .ap-pg .ap-poi.lb .ap-pl{display:block}
 .ap-pg .ap-poi.fl .ap-pi{left:auto;right:-13px;flex-direction:row-reverse}
 .ap-pg .ap-poi.fl .ap-pl{margin-left:0;margin-right:4px}
 .ap-pg .ap-gn{z-index:1}
 .ap-pg .ap-gn .ap-pi{transform:translate(-50%,-50%);min-width:24px;justify-content:center;padding:3px 5px;border-radius:8px;
   background:var(--eb);color:var(--sheet);font-size:12px;font-weight:800;line-height:1}
+.ap-pg .ap-gn.al-s .ap-pi,.ap-pg .ap-lbl.al-s .ap-pi{transform:translate(0,-50%)}
+.ap-pg .ap-gn.al-e .ap-pi,.ap-pg .ap-lbl.al-e .ap-pi{transform:translate(-100%,-50%)}
+/* Words from the map itself (concourses, levels, carousel numbers), with a halo so they read over lines. */
+.ap-pg .ap-lbl{z-index:1}
+.ap-pg .ap-lbl .ap-pi{transform:translate(-50%,-50%);font-size:13px;font-weight:600;line-height:1.1;color:var(--mu);
+  text-shadow:0 0 2px var(--ap-ground),0 0 3px var(--ap-ground),0 0 5px var(--ap-ground)}
+.ap-pg .ap-lbl.bd .ap-pi{font-weight:800;color:var(--ink)}
+.ap-pg .ap-lbl.big .ap-pi{font-weight:800;color:var(--ink);font-size:14px;letter-spacing:.01em}
 
 /* tools under the map */
-.ap-pg .ap-tools{display:flex;align-items:center;gap:8px;margin-top:10px}
+.ap-pg .ap-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
 .ap-pg .ap-tb{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:44px;min-width:44px;border-radius:22px;
   background:var(--cr);color:var(--ink);font-size:14px;font-weight:700;flex:none;transition:opacity .2s}
 .ap-pg .ap-tb .i{font-size:20px}
 .ap-pg .ap-gt{padding:0 16px 0 13px;background:var(--ink);color:var(--page);min-width:0;flex:0 1 auto}
 .ap-pg .ap-gt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-pg .ap-wk{padding:0 16px 0 13px;text-decoration:none;min-width:0;flex:0 1 auto}
+.ap-pg .ap-wk span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ap-pg .ap-tb[disabled]{opacity:.38;cursor:default}
 .ap-pg .ap-cap{margin:10px 2px 0;font-size:13px;color:var(--mu);min-height:18px}
 .ap-pg .ap-key{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:13px;color:var(--mu);font-weight:600}
 .ap-pg .ap-key span{display:inline-flex;align-items:center;gap:6px}
 .ap-pg .ap-k{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none}
-.ap-pg .ap-k.you{background:var(--ro)}
-.ap-pg .ap-k.rt{width:16px;height:4px;border-radius:2px;background:var(--ro)}
+.ap-pg .ap-k.you{background:var(--ink)}
+.ap-pg .ap-k.rt{width:16px;height:4px;border-radius:2px;background:var(--ink)}
 .ap-pg .ap-k.gt{width:8px;height:8px;background:var(--eb)}
-.ap-pg .ap-k.sc{border-radius:2px;background:var(--ink)}
+.ap-pg .ap-k.sc{position:relative;border-radius:2px;box-shadow:inset 0 0 0 1.5px var(--warn)}
+.ap-pg .ap-k.sc::before{content:'';position:absolute;inset:0;border-radius:2px;background:var(--warn);opacity:.3}
+.ap-pg .ap-k.wk{width:16px;height:0;border-radius:0;border-top:3px dashed var(--eb)}
 .ap-pg .ap-k.fd{width:8px;height:8px;background:var(--s3)}
 .ap-pg .ap-notes{margin:12px 0 0;padding:0 0 0 18px;font-size:13px;line-height:1.45;color:var(--ink)}
 .ap-pg .ap-notes li+li{margin-top:4px}
@@ -172,9 +248,19 @@
 .ap-pg .ap-fd b,.ap-pg .ap-sv b,.ap-pg .ap-lk b{display:block;font-size:15px;font-weight:800;line-height:1.3}
 .ap-pg .ap-fd small,.ap-pg .ap-sv small,.ap-pg .ap-lk small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.4}
 .ap-pg .ap-fd .ap-fn{color:var(--ink)}
-.ap-pg .ap-near{flex:none;max-width:36%;padding:5px 9px;border-radius:12px;background:var(--cr);font-size:13px;font-weight:700;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-.ap-pg .ap-near.me{background:var(--eb);color:var(--sheet)}
+/* One status per place; the dot says open (green), opens later (amber) or closed (grey). */
+.ap-pg .ap-os{display:inline-flex;align-items:center;gap:6px;flex:none;margin-top:1px;padding:4px 10px;border-radius:12px;background:var(--cr);
+  font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap}
+.ap-pg .ap-os::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--mu);flex:none}
+.ap-pg .ap-os.on::before{background:var(--eb)}
+.ap-pg .ap-os.soon::before{background:var(--warn)}
+.ap-pg .ap-fd .ap-me{color:var(--eb);font-weight:700}
+/* One 44px row per number; the number never wraps. */
+.ap-pg .ap-calls{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.ap-pg .ap-call{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 14px;border-radius:14px;background:var(--cr);
+  color:var(--ink);text-decoration:none;font-weight:700;font-size:14px;line-height:1.2;min-width:0}
+.ap-pg .ap-call .i{font-size:18px;color:var(--eb);flex:none}
+.ap-pg .ap-call .tn{flex:none;white-space:nowrap;font-weight:600;color:var(--mu)}
 .ap-pg .ap-lk{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 0;border-top:1px solid var(--ln);color:var(--ink);text-decoration:none}
 
 /* ---------- ground ---------- */
@@ -185,7 +271,7 @@
 .ap-pg .ap-gr small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.4}
 .ap-pg .ap-gr .ap-gd,.ap-pg .ap-gr .ap-bd{display:flex;gap:6px;align-items:flex-start;color:var(--ink)}
 .ap-pg .ap-gd .i{color:var(--ok);margin-top:2px;flex:none}
-.ap-pg .ap-bd .i{color:var(--rot);margin-top:2px;flex:none}
+.ap-pg .ap-bd .i{color:var(--warn);margin-top:2px;flex:none}
 .ap-pg .ap-tr{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px;margin-bottom:10px;border-radius:20px;background:var(--sd);color:var(--sdt);text-decoration:none}
 .ap-pg .ap-tr .ic{background:var(--sheet)}
 .ap-pg .ap-tr b{display:block;font-size:15px;font-weight:800}
@@ -193,12 +279,13 @@
 .ap-pg .ap-tr .ap-chev{color:var(--sdt)}
 
 /* ---------- facts, tips ---------- */
-.ap-pg .ap-facts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ap-pg .ap-facts{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:start}
+.ap-pg .ap-fact.long{grid-column:1/-1}
 .ap-pg .ap-fact{background:var(--cr);border-radius:18px;padding:11px 13px;min-width:0}
-.ap-pg .ap-fact small{display:block;font-size:13px;color:var(--mu);font-weight:600}
+.ap-pg .ap-fact small{display:block;font-size:13px;color:var(--mu);font-weight:600;text-wrap:balance}
 .ap-pg .ap-fact b{display:block;font-size:17px;font-weight:800;margin-top:2px;line-height:1.2;overflow-wrap:anywhere}
 .ap-pg .ap-fact span{display:block;font-size:13px;color:var(--mu);margin-top:3px;line-height:1.35}
 .ap-pg .ap-tips{list-style:none;margin:6px 0 0;padding:0}
 .ap-pg .ap-tips li{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.45;padding:6px 0}
 .ap-pg .ap-tips .i{font-size:17px;color:var(--eb);flex:none;margin-top:2px}
-.ap-pg .ap-cav .i{color:var(--rot)}
+.ap-pg .ap-cav .i{color:var(--warn)}

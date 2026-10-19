@@ -1,12 +1,14 @@
 /* Shell, type and shared components. Visual spec: the approved Compound-style
    mockups (widget_v4). Sizes are px to match the spec at 390pt wide. */
 *,*::before,*::after{box-sizing:border-box}
-html,body{height:100%}
+html,body{height:100%;overscroll-behavior:none;touch-action:manipulation}
 body{margin:0;background:var(--band);color:var(--ink);font:15px/1.35 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
   -webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%;overflow:hidden;
   -webkit-tap-highlight-color:transparent}
 button{all:unset;box-sizing:border-box;cursor:pointer;-webkit-tap-highlight-color:transparent}
-button:focus-visible,a:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--eb);outline-offset:2px;border-radius:10px}
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--eb);outline-offset:2px}
+/* Long-pressing a control never selects its text or opens the iOS callout. */
+:is(button,a,.chip,.tile,.op,.nv){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 a{color:inherit}
 input,select,textarea{font:inherit;color:inherit}
 [hidden]{display:none!important}
@@ -17,7 +19,7 @@ input,select,textarea{font:inherit;color:inherit}
 
 /* ---------- Shell ---------- */
 #app{position:fixed;inset:0;background:var(--band);overflow:hidden}
-#view{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;
+#view{position:absolute;inset:0;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:manipulation;
   background:var(--page);transform-origin:50% 0;
   transition:transform .56s cubic-bezier(.32,.72,0,1),border-radius .56s cubic-bezier(.32,.72,0,1),background .3s}
 #view[data-tone="cream"]{background:var(--cr)}
@@ -26,27 +28,45 @@ input,select,textarea{font:inherit;color:inherit}
 .tb{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:10px;
   height:calc(56px + env(safe-area-inset-top,0px));padding-top:env(safe-area-inset-top,0px);
   padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  background:var(--band);color:var(--ob);transition:background .3s,color .3s,opacity .3s}
+  flex:none;background:var(--band);color:var(--ob);transition:background .3s,color .3s,opacity .3s,box-shadow .2s}
+/* Pulling down at the top shows more top-bar colour, never the page behind it. */
+.tb::before{content:'';position:absolute;left:0;right:0;bottom:100%;height:100vh;background:inherit;pointer-events:none}
 #view[data-tone="cream"] .tb{color:var(--ink)}
 .tbb{width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:26px;border-radius:14px}
-.wm{font-family:Figtree,Inter,system-ui,sans-serif;font-weight:800;font-size:22px;letter-spacing:-.03em;text-decoration:none;color:inherit}
+.tb :is(.tbb,.av){transition:opacity .2s,scale var(--press) var(--ease)}
+.wm{font-family:Figtree,Inter,system-ui,sans-serif;font-weight:800;font-size:22px;letter-spacing:-.03em;text-decoration:none;color:inherit;padding:7px 10px;margin:-7px -10px;border-radius:14px}
 .av{width:38px;height:38px;border-radius:50%;background:var(--cr);color:var(--eb);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;position:relative}
+.tb .av::after{content:'';position:absolute;inset:-3px;border-radius:50%}
 #view[data-tone="cream"] .av{background:var(--sheet)}
-.av .bdg{position:absolute;right:-1px;top:-1px;width:11px;height:11px;border-radius:50%;background:var(--ro);box-shadow:0 0 0 2px var(--band)}
 
 #strip:empty{display:none}
-#strip{position:sticky;top:calc(56px + env(safe-area-inset-top,0px));z-index:4;background:var(--band);color:var(--ob);padding-bottom:8px}
+/* 6px here plus the 6px under the 44px top-bar buttons keeps the strip 12px clear of them. */
+#strip{flex:none;position:sticky;top:calc(56px + env(safe-area-inset-top,0px));z-index:4;background:var(--band);color:var(--obt);padding-top:6px;padding-bottom:8px}
 #view[data-tone="cream"] #strip{color:var(--ink)}
-.strip{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;border-radius:14px;padding:8px 12px;background:var(--onband)}
+.strip{position:relative;display:flex;align-items:center;gap:8px;min-height:44px;padding:10px 14px;border-radius:14px;background:var(--onband);
+  color:inherit;font-size:13px;font-weight:600;line-height:1.3;white-space:nowrap}
 .strip .i{font-size:16px}
+.strip b{flex:none;font-weight:800}
+.strip.off .i{color:var(--rot)}
+#strip button::after{content:'';position:absolute;inset:0 0 -8px}
+/* Once content runs under the top bar it gets an edge, under the strip when one shows. */
+#strip{transition:box-shadow .2s}
+#view.scrolled:has(#strip:empty) .tb,#view.scrolled #strip:not(:empty){box-shadow:0 1px 0 rgb(0 0 0/.06),0 10px 16px -14px rgb(0 0 0/.35)}
 
-.hero{position:relative;background:var(--band);color:var(--ob);min-height:40px;padding-bottom:28px;overflow:hidden}
-.hero:empty{min-height:40px}
-.sheet{position:relative;z-index:1;background:var(--sheet);border-radius:28px 28px 0 0;margin-top:-28px;padding-top:22px;
-  padding-bottom:calc(120px + env(safe-area-inset-bottom,0px));min-height:calc(100% - 96px)}
+.hero{position:relative;flex:none;background:var(--band);color:var(--ob);min-height:40px;padding-bottom:48px;overflow:hidden}
+.hero:empty{min-height:40px;padding-bottom:0}
+.sheet{position:relative;z-index:1;flex:1 0 auto;min-height:0;background:var(--sheet);border-radius:28px 28px 0 0;margin-top:-28px;padding-top:22px;
+  padding-bottom:calc(120px + env(safe-area-inset-bottom,0px))}
+/* Sheet top to first content is always the 22px padding. */
+.sheet>:first-child,.sheet>.sec:first-child,.sheet>:first-child>.sec:first-child{margin-top:0}
 #view[data-tone="cream"] .hero{display:none}
-#view[data-tone="cream"] .sheet{background:transparent;margin-top:0;border-radius:0;padding-top:8px}
+#view[data-tone="cream"] .sheet{background:transparent;margin-top:0;border-radius:0;padding-top:16px}
 #view.nonav .sheet{padding-bottom:calc(40px + env(safe-area-inset-bottom,0px))}
+/* Content fades out under the floating tab bar instead of showing around and below it. */
+#view::after{content:'';position:fixed;z-index:7;left:0;right:0;bottom:0;height:calc(90px + env(safe-area-inset-bottom,0px));pointer-events:none;
+  background:linear-gradient(to top,var(--sheet) 35%,transparent);transition:opacity .3s}
+#view[data-tone="cream"]::after{background:linear-gradient(to top,var(--cr) 35%,transparent)}
+#view.nonav::after,#app.mo #view::after{opacity:0}
 
 /* Floating nav */
 .nv{position:fixed;z-index:8;left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));
@@ -56,22 +76,25 @@ input,select,textarea{font:inherit;color:inherit}
 .nvi{position:relative;display:flex;height:100%}
 .nvp{position:absolute;top:0;bottom:0;left:0;right:80%;border-radius:27px;background:var(--pill)}
 .nvp.none{opacity:0}
-.nv button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;font-weight:600;color:var(--navi);position:relative;z-index:1;transition:color .3s;border-radius:27px}
+.nv button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;font-weight:600;color:var(--navi);position:relative;z-index:1;transition:color .3s,scale var(--press) var(--ease),opacity var(--press);border-radius:27px}
 .nv button .i{font-size:22px}
 .nv button[aria-current]{color:var(--pillt)}
 
 /* Side menu (sits on the band behind the view) */
-#menu{position:absolute;inset:0;color:var(--obt);padding-top:env(safe-area-inset-top,0px);overflow-y:auto;visibility:hidden}
-#app.mo #menu{visibility:visible}
+#menu{position:absolute;inset:0;color:var(--obt);padding-top:env(safe-area-inset-top,0px);overflow-y:auto;visibility:hidden;touch-action:pan-y;
+  pointer-events:none;transition:visibility 0s .3s}
+#app.mo #menu{visibility:visible;pointer-events:auto;transition:none}
 #app.mo #view{transform:translateY(calc(100% - 132px - env(safe-area-inset-bottom,0px)));border-radius:28px 28px 0 0;overflow:hidden;cursor:pointer;
-  box-shadow:0 -12px 40px rgba(0,0,0,.12)}
-#app.mo #view .tb{opacity:0}
+  box-shadow:0 -12px 40px rgba(0,0,0,.12);touch-action:none}
+#app.mo #view .tb{opacity:1;pointer-events:none}
+#app.mo #view .tb :is(.tbb,.av){opacity:0}
+#app.mo #view #strip>*{visibility:hidden}
 #app.mo .nv{transform:translateY(calc(100% + 40px + env(safe-area-inset-bottom,0px)));opacity:0;pointer-events:none}
 .mhd{display:flex;align-items:center;justify-content:space-between;height:56px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .mbody{padding-top:14px}
 .smr{opacity:0;transform:translateX(-18px);transition:opacity .3s,transform .56s cubic-bezier(.32,.72,0,1)}
 #app.mo .smr{opacity:1;transform:none}
-.mr{display:flex;align-items:center;gap:14px;min-height:56px;width:100%;color:var(--obt)}
+.mr{display:flex;align-items:center;gap:14px;min-height:56px;width:calc(100% + 20px);margin:0 -10px;padding:0 10px;border-radius:16px;color:var(--obt)}
 .mi{width:36px;height:36px;border-radius:12px;background:var(--onband2);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none}
 .mt{flex:1;font-size:17px;font-weight:600;line-height:1.2}.mt small{display:block;font-size:13px;font-weight:400;opacity:.85}
 .mr>.i{font-size:18px}
@@ -80,12 +103,15 @@ input,select,textarea{font:inherit;color:inherit}
 .ey{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--eb);font-weight:800}
 .hero .ey,.on-band .ey{color:var(--obt)}
 .dp{font-family:"Inter Tight",Inter,system-ui,sans-serif;font-weight:900;text-transform:uppercase;line-height:.86;letter-spacing:-.02em}
-.tn{font-variant-numeric:tabular-nums}
+.tn,.chip,.tile b,small time,[data-k]{font-variant-numeric:tabular-nums}
+.ey .tn{text-transform:none}
 .hl{margin:6px 0 0;font-size:32px;line-height:1.06;font-weight:300;letter-spacing:-.02em}.hl b{font-weight:800}
 .h2{margin:0;font-size:22px;line-height:1.15;font-weight:800;letter-spacing:-.01em}
 .sub{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mu);margin-top:6px}
 .mu{color:var(--mu)}
 .small{font-size:13px}
+.help{font-size:13px;color:var(--mu)}
+.tbd{font-size:15px;font-weight:600;color:var(--mu)}
 .sec{margin-top:22px}
 .sec>.ey:first-child{margin-bottom:10px}
 .stack>*+*{margin-top:12px}
@@ -94,6 +120,11 @@ input,select,textarea{font:inherit;color:inherit}
 .wrap{display:flex;flex-wrap:wrap;gap:8px}
 .grow{flex:1;min-width:0}
 .ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Line breaks: headings balance and body text avoids a one-word last line. Wrap each
+   ' · ' meta part in .nw so a separator never ends a line. */
+h1,h2,h3,.dp,.hl,.h2,.cx-sum,[class$=-ttl]{text-wrap:balance}
+p,small,.mu,.sub{text-wrap:pretty}
+.nw{white-space:nowrap}
 
 /* ---------- Components ---------- */
 .card{border-radius:26px;padding:20px;position:relative;overflow:hidden;background:var(--cr)}
@@ -106,7 +137,7 @@ input,select,textarea{font:inherit;color:inherit}
 
 .chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:16px;font-size:13px;font-weight:600;background:var(--sheet);color:var(--ink);white-space:nowrap;text-decoration:none;max-width:100%}
 .chip .i{font-size:16px}
-.chip.warn{background:transparent;border:1.5px solid var(--ro);color:var(--rot)}
+.chip.warn{background:transparent;border:1.5px solid var(--warn);color:var(--ink)}.chip.warn .i{color:var(--warn)}
 .chip.rose{background:var(--rob);color:var(--robt)}
 .chip.dk2{background:var(--ink);color:var(--page)}
 .chip.cr{background:var(--cr)}
@@ -115,7 +146,7 @@ input,select,textarea{font:inherit;color:inherit}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
 .dot.neutral{background:var(--mu)}.dot.stale,.dot.warn{background:var(--ro)}
 
-.fab{width:52px;height:52px;border-radius:50%;background:var(--ro);color:var(--rog);display:flex;align-items:center;justify-content:center;font-size:24px;flex:none}
+.fab{width:52px;height:52px;border-radius:50%;background:var(--ink);color:var(--sheet);display:flex;align-items:center;justify-content:center;font-size:24px;flex:none}
 .tile{background:var(--tile);border-radius:18px;padding:11px 13px;min-width:0;position:relative}
 .tile small{display:block;font-size:13px;color:var(--mu)}
 .tile b{display:block;font-size:22px;font-weight:800;margin:2px 0 1px}
@@ -139,19 +170,31 @@ input,select,textarea{font:inherit;color:inherit}
 .cn .w{box-shadow:inset 0 0 0 1.5px var(--ro)}.cn .w b{color:var(--rot)}
 
 .ps{display:inline-flex;padding:4px;border-radius:22px;background:var(--onband);gap:2px}
-.ps button{height:34px;padding:0 16px;border-radius:17px;font-size:14px;font-weight:800;color:var(--obt);display:flex;align-items:center;transition:background .3s,color .3s}
+.ps button{height:34px;padding:0 16px;border-radius:17px;font-size:14px;font-weight:800;color:var(--obt);display:flex;align-items:center;transition:background .3s,color .3s,scale var(--press) var(--ease),opacity var(--press)}
 .ps button[aria-pressed="true"]{background:var(--sheet);color:var(--ink)}
-.seg{display:inline-flex;padding:4px;border-radius:22px;background:var(--cr);gap:2px}
-.seg button{height:34px;padding:0 14px;border-radius:17px;font-size:14px;font-weight:700;color:var(--mu);display:flex;align-items:center;gap:6px;transition:background .3s,color .3s}
+.seg{display:inline-flex;padding:4px;border-radius:22px;background:var(--cr);gap:2px;white-space:nowrap}
+.seg button{height:34px;padding:0 14px;border-radius:17px;font-size:14px;font-weight:700;color:var(--mu);display:flex;align-items:center;gap:6px;transition:background .3s,color .3s,scale var(--press) var(--ease),opacity var(--press)}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--page)}
 
-.co{display:flex;gap:10px;align-items:flex-start;border-radius:18px;padding:11px 14px;font-size:13px;font-weight:600;line-height:1.35;background:var(--sd);color:var(--sdt)}
-.co .i{font-size:18px;margin-top:-1px}
+/* Callouts read as text: regular weight, with any lead phrase in <b>. */
+.co{display:flex;gap:10px;align-items:flex-start;border-radius:18px;padding:11px 14px;font-size:13px;font-weight:400;line-height:1.45;background:var(--sd);color:var(--sdt)}
+.co b{font-weight:700}
+.co .i{font-size:18px;margin-top:0}
 .co.rose{background:var(--rob);color:var(--robt)}
 .co.plain{background:var(--cr);color:var(--ink)}
 .op{background:var(--cr);border-radius:20px;padding:9px 12px}
 .mta{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex:none}
 .hatch{background:repeating-linear-gradient(135deg,var(--ht) 0 4px,transparent 4px 8px)}
+
+/* Sideways rows stop at their ends instead of dragging the page, settle on an item and
+   show no scrollbar. The snap inset matches each row's left padding so it rests where
+   it starts. Screen CSS may restyle these rows but should keep this. */
+:is(.fd-chips,.ap-jump,.na-chips,.pl-dishes,.fd-acs){scroll-snap-type:x proximity;overscroll-behavior-x:contain;scrollbar-width:none;scroll-padding-inline:20px}
+:is(.fd-chips,.ap-jump,.na-chips,.pl-dishes,.fd-acs)::-webkit-scrollbar{display:none}
+:is(.fd-chips,.ap-jump,.na-chips,.pl-dishes,.fd-acs)>*{scroll-snap-align:start}
+:is(.fd-chips,.fd-acs){scroll-padding-inline:calc(max(20px,env(safe-area-inset-left,0px)) - 3px)}
+.fd-mtop .fd-chips{scroll-padding-inline:13px}
+.na-chips{scroll-padding-inline:16px}
 
 /* Banners */
 .bn{border-radius:20px;padding:12px 14px;display:flex;gap:10px;align-items:flex-start;background:var(--rob);color:var(--robt)}
@@ -179,13 +222,22 @@ input,select,textarea{font:inherit;color:inherit}
 /* Toast */
 #toast{position:fixed;z-index:20;left:50%;bottom:calc(92px + env(safe-area-inset-bottom,0px));transform:translate(-50%,16px);opacity:0;
   background:var(--ink);color:var(--page);font-size:14px;font-weight:600;padding:10px 16px;border-radius:18px;pointer-events:none;
-  transition:opacity .25s,transform .35s cubic-bezier(.32,.72,0,1);max-width:calc(100% - 40px);text-align:center}
+  transition:opacity .25s,transform .35s cubic-bezier(.32,.72,0,1);width:max-content;max-width:calc(100% - 40px);text-align:center}
 #toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* Pressed states. Controls shrink and dim slightly; rows and cards tint instead so
+   wide things never visibly shrink. Maps, drag tracks and scrims keep their own
+   feedback. iOS only applies :active because core.js listens for touchstart. */
+:where(button,a[href],[data-act]){transition:scale var(--press) var(--ease),opacity var(--press)}
+:where(button,a[href],[data-act]):not(:where(.leaflet-container *,.ap-mv,.ap-mv *,.pl-lb-track,.pl-lb-track *,.fd-scrim,.na-grab,[disabled],[aria-disabled="true"])):active{scale:.97;opacity:.82}
+:is(button,a[href]):is(.op,.tr-op,.na-row,.na-li,.na-card,.fd-card,.td-mini,.td-row,.td-legs,.td-stale,.wl-cb,.wl-card,.wl-addrow,.ap-step,.fx-row,.fl-tk,.fl-cx,.card,.bn,.co,.tile,.mr,.strip):active{
+  scale:none;opacity:1;background-image:linear-gradient(color-mix(in srgb,var(--ink) 6%,transparent),color-mix(in srgb,var(--ink) 6%,transparent))}
 
 /* Motion helpers */
 .sw{transition:transform .56s cubic-bezier(.32,.72,0,1),opacity .26s ease}
-@keyframes flash{0%{background-color:var(--rob)}100%{background-color:transparent}}
-.chg{animation:flash 1.6s ease-out 1}
+/* A value that just changed gets a soft tint that fades. */
+@keyframes flash{0%,40%{background-color:color-mix(in srgb,var(--eb) 18%,transparent)}100%{background-color:transparent}}
+.chg{animation:flash 2.4s ease-out 1;border-radius:6px;padding:0 3px;margin:0 -3px}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .rise{animation:rise .5s cubic-bezier(.32,.72,0,1) both}
 .skel{background:var(--cr);border-radius:12px;color:transparent!important}
@@ -194,4 +246,6 @@ input,select,textarea{font:inherit;color:inherit}
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0ms!important}
+  :where(button,a[href],[data-act]):active{scale:none}
+  .chg{animation:none;background-color:color-mix(in srgb,var(--eb) 18%,transparent)}
 }

@@ -108,25 +108,36 @@ N.legStatus = l => {
 // ---------- connections ----------
 const CONC = ['A', 'B', 'C', 'D', 'E'];
 const concourse = g => { const m = String(g || '').trim().toUpperCase().match(/^([A-Z])/); return m ? m[1] : null; };
-// Walking minutes between two CLT gates; 15 when a gate is not known yet.
-N.walk = (g1, g2) => {
+// Walking minutes between two gates: N.walk(code, g1, g2), or N.walk(g1, g2) for Charlotte.
+// The airport map's figure (N.navWalk) when it has both gates; otherwise a guess from the
+// CLT concourse letters; 15 when a gate is not known yet.
+N.walk = (...args) => {
+  const [code, g1, g2] = args.length >= 3 ? args : ['CLT', ...args];
   const a = concourse(g1), b = concourse(g2);
+  if (g1 && g2 && typeof N.navWalk === 'function') {
+    let m = null;
+    try { m = N.navWalk(code, g1, g2); } catch (e) { m = null; }
+    if (Number.isFinite(m) && m > 0) return {min: Math.ceil(m), known: true, same: !!a && a === b, nav: true};
+  }
   if (!a || !b) return {min: 15, known: false};
   if (a === b) return {min: 5, known: true, same: true};
   const i = CONC.indexOf(a), j = CONC.indexOf(b);
   return {min: i >= 0 && j >= 0 && Math.abs(i - j) === 1 ? 10 : 20, known: true};
 };
-// ok: 30+ free minutes before boarding, tight: 15-29, risk: under 15.
+// Rated by spare: minutes from reaching the next gate to its doors closing. ok 20+, tight 8-19,
+// risk under 8. free = minutes before boarding starts (spare - 25); it goes negative first.
 N.connection = dir => {
   const [a, b] = N.dirLegs(dir);
   if (!a || !b || !a.arr.time || !b.dep.time) return null;
   const ground = N.mins(a.arr.time, b.dep.time);
-  const walk = N.walk(a.arr.gate, b.dep.gate);
+  const walk = N.walk(a.to, a.arr.gate, b.dep.gate);
   // Plane to gate: about 10 minutes from touchdown to the door opening.
-  const free = N.mins(N.addMin(a.arr.time, 10 + walk.min), b.board);
-  const level = b.canceled || a.canceled ? 'risk' : free >= 30 ? 'ok' : free >= 15 ? 'tight' : 'risk';
-  return {dir, a, b, at: a.to, ground, walk, free, level,
-    text: level === 'ok' ? 'Comfortable' : level === 'tight' ? 'Tight' : 'At risk'};
+  const reach = N.addMin(a.arr.time, 10 + walk.min);
+  const free = N.mins(reach, N.addMin(b.dep.time, -N.AA.board));
+  const spare = N.mins(reach, N.addMin(b.dep.time, -N.AA.doors));
+  const level = b.canceled || a.canceled ? 'risk' : spare >= 20 ? 'ok' : spare >= 8 ? 'tight' : 'risk';
+  const label = level === 'ok' ? 'Comfortable' : level === 'tight' ? 'Tight' : 'At risk';
+  return {dir, a, b, at: a.to, ground, walk, free, spare, level, label, text: label};
 };
 
 // ---------- trip phases ----------
@@ -161,6 +172,57 @@ N.phase = () => {
   if (r && now > r[1]) return 'after';
   return 'stay';
 };
+// ---------- hot window ----------
+// From three hours before each departure until takeoff the cloud checks every minute.
+// This is the same rule as the updater, so the two agree:
+//   start = earlier of scheduled/estimated departure - 3 h
+//   end   = once departed: takeoff + 20 min (actual departure, else the check that first
+//           saw it go, else now); before that: later of scheduled/estimated + 45 min, so a
+//           delay that keeps moving keeps it hot. Never past scheduled + 12 h.
+// Canceled legs and legs with no departure time are never hot. Overlapping windows merge.
+const HOUR = 3600000;
+const AIR = /\b(in air|airborne|climb|cruis|descen|approach|landed|arriv)/i;
+function hotSpan(l, now) {
+  const sched = T(l.dep.sched), est = ok(T(l.dep.est)) ? T(l.dep.est) : sched;
+  if (l.canceled || !ok(sched)) return null;
+  let end;
+  if (l.departed || l.dep.actual || AIR.test(l.phase || '')) {
+    // dep.actual is a flag: when set, dep.est holds the actual departure time.
+    const seen = l.events.find(e => e && /^Departed\b/.test(e.text || ''));
+    const off = l.dep.actual && ok(T(l.dep.est)) ? T(l.dep.est) : seen && ok(T(seen.at)) ? T(seen.at) : now;
+    end = off + 20 * 60000;
+  } else end = Math.max(sched, est) + 45 * 60000;
+  return {id: l.id, dep: est, start: Math.min(sched, est) - 3 * HOUR, end: Math.min(end, sched + 12 * HOUR)};
+}
+// {until, legId, start, source: 'cloud'|'app'} while the trip is hot, else null. A recent
+// status (15 min) that says it is hot (run.hot_until) wins, and one checked after this window
+// opened that says it is not (hot_until null) wins too; the app's own rule covers the rest.
+// legId is the latest leg whose window holds now: at a connection, the next flight.
+N.hotWindow = () => {
+  const now = N.now().getTime();
+  const spans = N.legs().map(l => hotSpan(l, now)).filter(Boolean).sort((a, b) => a.start - b.start);
+  const groups = [];
+  spans.forEach(s => {
+    const g = groups[groups.length - 1];
+    if (g && s.start <= g.end) { g.end = Math.max(g.end, s.end); g.legs.push(s); }
+    else groups.push({start: s.start, end: s.end, legs: [s]});
+  });
+  const inside = s => s.start <= now && now <= s.end;
+  const hit = groups.find(inside);
+  const pick = g => g.legs.filter(inside).pop() || g.legs[0];
+  const st = N.data.status, run = st && st.run || {};
+  const checked = T(st && st.checked_at), cloud = T(run.hot_until), iso = v => new Date(v).toISOString();
+  if (now - checked <= 15 * 60000 && 'hot_until' in run) {
+    if (ok(cloud) && cloud > now) {
+      const near = hit ? pick(hit) : spans.slice().sort((a, b) => Math.abs(a.dep - now) - Math.abs(b.dep - now))[0];
+      return {until: iso(cloud), legId: near ? near.id : null, start: hit ? iso(hit.start) : null, source: 'cloud'};
+    }
+    if (hit && checked >= hit.start) return null;
+  }
+  if (!hit) return null;
+  return {until: iso(hit.end), legId: pick(hit).id, start: iso(hit.start), source: 'app'};
+};
+
 // The leg to look at now: the first one not yet landed in the current or next direction.
 N.nextLeg = () => {
   const legs = N.legs().filter(l => l.state !== 'past' && l.state !== 'landed');

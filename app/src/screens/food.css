@@ -2,9 +2,10 @@
 
 /* ---------- hero ---------- */
 .fd-hero{padding-top:4px}
-.fd-big{margin:8px 0 0 -3px;font-size:min(118px,30vw);color:var(--ob)}
+.fd-big{margin:8px 0 0 -3px;font-size:min(88px,22vw);color:var(--ob)}
 .fd-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.fd-stats .chip{height:34px;font-size:14px}
+.fd-stats .chip{height:34px;font-size:14px;font-variant-numeric:tabular-nums}
+.dot.fd-dw{background:var(--warn)}
 
 /* ---------- search row ---------- */
 .fd-srow{display:flex;align-items:center;gap:10px}
@@ -22,7 +23,7 @@
   margin-left:calc(-1 * max(20px,env(safe-area-inset-left,0px)));margin-right:calc(-1 * max(20px,env(safe-area-inset-right,0px)));
   padding-left:calc(max(20px,env(safe-area-inset-left,0px)) - 3px);padding-right:calc(max(20px,env(safe-area-inset-right,0px)) - 3px)}
 .fd-chips::-webkit-scrollbar,.fd-acs::-webkit-scrollbar{display:none}
-.fd-chips{margin-top:8px}
+.fd-chips{margin-top:10px}
 .fd-qc{flex:none;height:44px;display:flex;align-items:center;padding:0 3px;border-radius:18px}
 .fd-qcp{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 13px;border-radius:18px;background:var(--cr);color:var(--ink);font-size:14px;font-weight:700;white-space:nowrap;transition:background .2s,color .2s}
 .fd-qcp .i{font-size:17px;color:var(--eb)}
@@ -35,13 +36,15 @@
 .fd-od{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
 
 /* ---------- view + sort bar ---------- */
-.fd-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+.fd-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+/* the view switch and the sort are the same 44px pill; each half of the switch is a full-height target */
 .fd-seg{flex:none}
-.fd-seg button{height:40px;padding:0 13px;border-radius:20px}
+.fd-seg button{position:relative;height:36px;padding:0 13px;border-radius:18px}
+.fd-seg button::after{content:"";position:absolute;inset:-4px 0}
 .fd-seg button .i{font-size:18px}
-.fd-sort{position:relative;flex:0 1 auto;min-width:0;display:flex;align-items:center;height:48px;border-radius:24px;background:var(--cr);color:var(--ink)}
-.fd-sort select{-webkit-appearance:none;appearance:none;border:0;margin:0;background:transparent;height:48px;max-width:100%;min-width:0;
-  padding:0 34px 0 38px;border-radius:24px;font-size:16px;font-weight:700;color:var(--ink);cursor:pointer;text-overflow:ellipsis}
+.fd-sort{position:relative;flex:0 1 auto;min-width:0;display:flex;align-items:center;height:44px;border-radius:22px;background:var(--cr);color:var(--ink)}
+.fd-sort select{-webkit-appearance:none;appearance:none;border:0;margin:0;background:transparent;height:44px;max-width:100%;min-width:0;
+  padding:0 34px 0 38px;border-radius:22px;font-size:16px;font-weight:700;color:var(--ink);cursor:pointer;text-overflow:ellipsis}
 .fd-sic,.fd-sch{position:absolute;top:50%;transform:translateY(-50%);pointer-events:none}
 .fd-sic{left:13px;font-size:18px;color:var(--eb)}
 .fd-sch{right:12px;font-size:16px;color:var(--mu)}
@@ -62,35 +65,35 @@
 .fd-list{display:flex;flex-direction:column;gap:12px;margin-top:10px}
 .fd-gh{margin:12px 2px 0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--eb);font-weight:800}
 .fd-gh:first-child{margin-top:4px}
-.fd-card{position:relative;display:flex;align-items:stretch;min-height:152px;border-radius:22px;background:var(--cr);color:var(--ink);text-decoration:none;overflow:hidden;transition:transform .2s}
-.fd-card:active{transform:scale(.985)}
-.fd-card:focus-visible{border-radius:22px}
+.fd-card{position:relative;display:flex;align-items:stretch;min-height:152px;border-radius:var(--r-lg);background:var(--cr);color:var(--ink);text-decoration:none;overflow:hidden}
+.fd-card:focus-visible{border-radius:var(--r-lg)}
 .fd-th{position:relative;flex:none;width:104px;display:flex;align-items:center;justify-content:center;overflow:hidden;
   background:color-mix(in srgb,var(--fb) 24%,var(--cr));color:var(--fb);font-size:30px}
 .fd-th img,.fd-pth img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .fd-ki{opacity:.75}
-.fd-cb{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding:12px 14px 13px}
+.fd-cb{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;padding:14px 16px}
 .fd-nm{font-size:16px;font-weight:800;line-height:1.22;letter-spacing:-.005em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .fd-rt{display:flex;align-items:center;gap:5px;font-size:13px;white-space:nowrap;min-width:0}
 .fd-rt b{font-weight:800;font-size:14px}
-.fd-stars{display:inline-flex;gap:1px;font-size:14px;color:var(--ro)}
+.fd-stars{display:inline-flex;gap:1px;font-size:14px;color:var(--ink)}
 .fd-mu{color:var(--mu)}
-.fd-meta{font-size:13px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.fd-st{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin-top:2px;min-width:0}
-.fd-oc{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:var(--sheet);font-size:13px;font-weight:700;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+/* "Bakery · 0.4 mi  ● Open till 9p"; when both don't fit, the status takes the next line whole rather than truncating */
+.fd-meta{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;min-width:0;font-size:13px;line-height:1.35;color:var(--mu)}
+.fd-mw{min-width:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fd-oc{flex:none;display:inline-flex;align-items:center;gap:6px;font-weight:700;color:var(--ink);white-space:nowrap}
 .fd-closing{color:var(--rot)}
 .fd-closing .fd-od{background:var(--ro)}
 .fd-closed,.fd-unk{color:var(--mu)}
-.fd-closed .fd-od,.fd-unk .fd-od{background:var(--mu)}
+.fd-closed .fd-od{background:var(--mu)}
+.fd-later .fd-od{background:var(--warn)}
 .fd-unk .fd-od{background:transparent;box-shadow:inset 0 0 0 1.5px var(--mu)}
-.fd-away{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:600;color:var(--mu);white-space:nowrap}
-.fd-away .i{font-size:15px}
-.fd-ord{font-size:13px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fd-ord{font-size:13px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .fd-ord b{font-weight:800;color:var(--eb)}
-.fd-bdgs{display:flex;flex-wrap:wrap;gap:5px;max-height:26px;overflow:hidden;margin-top:3px}
-.fd-bdg{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px 0 7px;border-radius:13px;font-size:13px;font-weight:600;white-space:nowrap;
-  background:color-mix(in srgb,var(--fb) 15%,var(--sheet));color:var(--ink)}
-.fd-bdg .i{font-size:15px;color:var(--fb)}
+.fd-bdgs{display:flex;gap:6px;min-width:0;margin-top:3px;overflow:hidden}
+.fd-bdg{flex:none;display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px 0 7px;border-radius:13px;font-size:13px;font-weight:600;white-space:nowrap;
+  background:var(--sheet);color:var(--ink)}
+.fd-bdg .i{font-size:15px;color:var(--mu)}
+.fd-plus{padding:0 9px;color:var(--mu)}
 
 /* ---------- empty states ---------- */
 .fd-empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:30px 8px 12px;text-align:center}
@@ -108,9 +111,9 @@
 .fd-scrim{position:absolute;inset:0;background:color-mix(in srgb,var(--robt) 48%,transparent);opacity:0;transition:opacity .28s ease;cursor:default}
 .fd-modal.on .fd-scrim{opacity:1}
 .fd-panel{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;max-height:calc(100% - 52px - env(safe-area-inset-top,0px));
-  background:var(--sheet);color:var(--ink);border-radius:28px 28px 0 0;box-shadow:var(--navs);transform:translateY(102%);transition:transform .42s cubic-bezier(.32,.72,0,1)}
+  background:var(--sheet);color:var(--ink);border-radius:28px 28px 0 0;box-shadow:var(--navs);transform:translateY(102%);transition:transform .28s var(--ease)}
 .fd-modal.on .fd-panel{transform:none}
-.fd-phd{flex:none;padding:8px max(20px,env(safe-area-inset-right,0px)) 8px max(20px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--ln)}
+.fd-phd{flex:none;touch-action:none;padding:8px max(20px,env(safe-area-inset-right,0px)) 8px max(20px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--ln)}
 .fd-grab{display:block;width:40px;height:5px;border-radius:3px;background:var(--gh);margin:0 auto 6px}
 .fd-phr{display:flex;align-items:center;gap:10px;min-height:46px}
 .fd-on{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:12px;background:var(--pill);color:var(--pillt);font-size:13px;font-weight:800}
@@ -122,11 +125,14 @@
 .fd-opts{display:flex;flex-wrap:wrap;gap:0 6px}
 .fd-opt{display:inline-flex;align-items:center;height:44px;max-width:100%;border-radius:19px}
 .fd-op{display:inline-flex;align-items:center;gap:7px;height:38px;max-width:100%;padding:0 14px;border-radius:19px;background:var(--cr);color:var(--ink);font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .2s,color .2s}
+/* the label shrinks, not the chip: a very long cuisine name ends in an ellipsis instead of pushing the sheet sideways */
+.fd-ol{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.fd-op .fd-n{flex:none}
 .fd-opt[aria-pressed="true"] .fd-op{background:var(--ink);color:var(--page)}
 .fd-opt[aria-pressed="true"] .fd-n{color:inherit;opacity:.72}
 .fd-opt[aria-disabled="true"]{cursor:default}
 .fd-opt[aria-disabled="true"] .fd-op{opacity:.4}
-.fd-ost{font-size:16px;color:var(--ro)}
+.fd-ost{font-size:16px;color:var(--ink)}
 .fd-opt[aria-pressed="true"] .fd-ost{color:inherit}
 .fd-sh{margin:4px 2px 0;font-size:13px;line-height:1.4;color:var(--mu)}
 .fd-sub{margin:10px 2px 0;font-size:13px;font-weight:700;color:var(--mu)}
@@ -142,6 +148,8 @@
   border-radius:28px 28px 0 0;overflow:hidden;background:var(--band);color:var(--ink);animation:fd-in .3s ease both}
 .fd-mapc{position:absolute;inset:0;z-index:0}
 .fd-mapc.leaflet-container{background:var(--band);font-family:inherit;outline-offset:-3px}
+.fd-nobase .fd-mapc.leaflet-container{background:var(--cr)}
+.fd-mfail .fd-mbtn,.fd-mfail .fd-moff{display:none}
 .fd-mload{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--ob);font-size:15px;font-weight:700;pointer-events:none}
 .fd-mload .i{font-size:22px}
 .fd-mtop{position:absolute;z-index:2;left:0;right:0;top:0;padding:14px max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));pointer-events:none}
@@ -149,27 +157,35 @@
 .fd-mtop .fd-q{border-color:transparent;box-shadow:0 4px 16px color-mix(in srgb,var(--robt) 20%,transparent)}
 .fd-mtop .fd-q:focus{border-color:var(--eb)}
 .fd-mtop .fd-fbtn{background:var(--sheet);box-shadow:0 4px 16px color-mix(in srgb,var(--robt) 20%,transparent)}
-.fd-mtop .fd-chips{pointer-events:auto;margin-top:4px;margin-left:calc(-1 * max(16px,env(safe-area-inset-left,0px)));margin-right:calc(-1 * max(16px,env(safe-area-inset-right,0px)));
+.fd-mtop .fd-chips{pointer-events:auto;margin-top:10px;margin-left:calc(-1 * max(16px,env(safe-area-inset-left,0px)));margin-right:calc(-1 * max(16px,env(safe-area-inset-right,0px)));
   padding:0 13px 6px;width:auto}
 .fd-mtop .fd-qcp{background:var(--sheet);box-shadow:0 2px 8px color-mix(in srgb,var(--robt) 22%,transparent)}
 .fd-mtop .fd-qc[aria-pressed="true"] .fd-qcp{background:var(--ink)}
 .fd-mtop .fd-qc[aria-disabled="true"] .fd-qcp{opacity:1;color:var(--mu)}
 .fd-mtop .fd-qc[aria-disabled="true"] .fd-qcp .i,.fd-mtop .fd-qc[aria-disabled="true"] .fd-od{opacity:.5}
 .fd-mbot{position:absolute;z-index:2;left:0;right:0;bottom:calc(104px + env(safe-area-inset-bottom,0px));padding:0 max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));pointer-events:none}
-.fd-mrow{display:flex;align-items:center;gap:8px;pointer-events:auto}
+/* only the controls take touches; the gaps between them belong to the map */
+.fd-mrow{display:flex;align-items:center;gap:8px;pointer-events:none}
+.fd-mrow>*{pointer-events:auto}
 .fd-mrow .fd-seg{background:var(--sheet);box-shadow:var(--navs)}
-.fd-mcount{flex:1;min-width:0}
-.fd-mcount:not(:empty){flex:0 1 auto;display:inline-flex;align-items:center;height:36px;padding:0 12px;border-radius:18px;background:var(--sheet);box-shadow:var(--navs);
-  font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fd-mcount{flex:0 0 auto}
+.fd-mcount:not(:empty){display:inline-flex;align-items:center;gap:4px;height:36px;padding:0 12px;border-radius:18px;background:var(--sheet);box-shadow:var(--navs);
+  font-size:13px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.fd-mcount b{font-weight:800}
+@media (max-width:388px){.fd-mu1{display:none}}
+.fd-moff{width:fit-content;max-width:100%;margin:0 0 8px;padding:7px 12px;border-radius:14px;background:var(--sheet);box-shadow:var(--navs);
+  font-size:13px;font-weight:600;line-height:1.3;color:var(--mu);pointer-events:none}
+.fd-moff[hidden],.fd-mbot:has(>.fd-pw:not([hidden]))>.fd-moff{display:none}
 .fd-mrow::after{content:"";flex:1}
 .fd-mbtn{order:2;width:44px;height:44px;flex:none;border-radius:50%;background:var(--sheet);color:var(--ink);box-shadow:var(--navs);display:flex;align-items:center;justify-content:center;font-size:21px}
 .fd-mrow::after{order:1}
-.fd-pw{position:relative;pointer-events:auto;animation:fd-up .28s cubic-bezier(.32,.72,0,1) both}
+.fd-pw{position:relative;pointer-events:auto;touch-action:none;animation:fd-up .28s var(--ease) backwards}
+.fd-prev:active{scale:none;opacity:1;background-image:linear-gradient(color-mix(in srgb,var(--ink) 6%,transparent),color-mix(in srgb,var(--ink) 6%,transparent))}
+.fd-pw.fd-drag .fd-prev:active{background-image:none}
 .fd-prev{display:flex;align-items:center;gap:12px;min-height:104px;padding:10px 44px 10px 10px;border-radius:22px;background:var(--sheet);color:var(--ink);text-decoration:none;box-shadow:var(--navs)}
 .fd-pth{position:relative;flex:none;width:84px;height:84px;border-radius:16px;overflow:hidden;display:flex;align-items:center;justify-content:center;
   background:color-mix(in srgb,var(--fb) 24%,var(--cr));color:var(--fb);font-size:28px}
 .fd-pbd{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
-.fd-pbd .fd-oc{background:var(--cr)}
 .fd-pch{position:absolute;right:14px;bottom:16px;font-size:20px;color:var(--mu)}
 .fd-px{position:absolute;top:2px;right:2px;width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:19px;color:var(--mu)}
 .fd-mmsg{position:absolute;z-index:2;left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));top:46%;transform:translateY(-50%);
@@ -177,27 +193,40 @@
 .fd-mmsg>b{font-size:17px;font-weight:800}
 .fd-mmsg>span{font-size:14px;line-height:1.4;color:var(--mu)}
 .fd-mmsg .fd-ebtns{display:flex}
-.fd-attr{position:absolute;z-index:1;left:16px;right:16px;bottom:calc(82px + env(safe-area-inset-bottom,0px));margin:0;font-size:13px;line-height:1.3;color:var(--mu);text-align:right;pointer-events:none;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the credits sit under the preview card's edge, so they step aside while it's open */
+.fd-pvon .fd-attr,.fd-pvon .leaflet-control-attribution{display:none}
+.fd-attr{position:absolute;z-index:1;left:8px;bottom:calc(82px + env(safe-area-inset-bottom,0px));max-width:calc(100% - 16px);box-sizing:border-box;margin:0;padding:1px 6px;border-radius:6px;
+  background:var(--sheet);opacity:.9;font-size:10px;line-height:1.5;color:var(--mu);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fd-attr:empty{display:none}
+/* the no-map notice is for people, not a credit, so it stays readable */
+.fd-nobase .fd-attr{font-size:13px}
 
-/* pins: Leaflet divIcons with a zero-size anchor; the pill centres on the spot */
-.fd-pin,.fd-me,.fd-hpin{background:none;border:0}
-.fd-pv{position:absolute;left:0;top:0;transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:3px;height:30px;padding:0 9px 0 7px;border-radius:15px;
-  background:var(--fb);color:var(--ff);font-size:13px;font-weight:800;white-space:nowrap;line-height:1;
-  box-shadow:0 0 0 2px var(--sheet),0 3px 8px color-mix(in srgb,var(--robt) 30%,transparent);transition:transform .18s cubic-bezier(.32,.72,0,1)}
-.fd-pv::before{content:"";position:absolute;left:-4px;right:-4px;top:-8px;bottom:-8px}
-.fd-pv .i{font-size:16px}
-.fd-pin.on .fd-pv{transform:translate(-50%,-50%) scale(1.2);box-shadow:0 0 0 2px var(--sheet),0 0 0 4px var(--ink),0 4px 12px color-mix(in srgb,var(--robt) 40%,transparent)}
-.fd-zc .fd-pv{width:26px;height:26px;padding:0;justify-content:center;border-radius:13px}
-.fd-zc .fd-pv b{display:none}
-.fd-zc .fd-pv::before{left:-9px;right:-9px;top:-9px;bottom:-9px}
-.fd-zc .fd-pin.on .fd-pv{width:auto;padding:0 9px 0 7px}
-.fd-zc .fd-pin.on .fd-pv b{display:inline}
+/* pins: Leaflet divIcons with a zero-size anchor; the dot centres on the spot. One style: an ink dot with the food's
+   icon, an --eb ring when it's open now; the picked one opens into a pill with its rating. 44px targets throughout. */
+.fd-pin,.fd-clu,.fd-me,.fd-hpin{background:none;border:0}
+.fd-pin:focus-visible,.fd-clu:focus-visible{outline:none}
+.fd-pv{position:absolute;left:0;top:0;transform:translate(-50%,-50%);display:inline-flex;align-items:center;justify-content:center;gap:4px;width:26px;height:26px;border-radius:13px;
+  background:var(--ink);color:var(--page);font-size:13px;font-weight:800;white-space:nowrap;line-height:1;
+  box-shadow:0 0 0 2px var(--sheet),0 2px 6px color-mix(in srgb,var(--robt) 28%,transparent);transition:transform .18s var(--ease)}
+.fd-pv::before{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;min-width:100%;transform:translate(-50%,-50%);border-radius:22px}
+.fd-pv .i{font-size:15px}
+.fd-pv b{display:none}
+.fd-po .fd-pv{box-shadow:0 0 0 2px var(--sheet),0 0 0 4.5px var(--eb),0 2px 6px color-mix(in srgb,var(--robt) 28%,transparent)}
+.fd-pin.on .fd-pv{width:auto;height:32px;padding:0 10px 0 8px;border-radius:16px;transform:translate(-50%,-50%) scale(1.06);
+  box-shadow:0 0 0 2px var(--sheet),0 4px 12px color-mix(in srgb,var(--robt) 40%,transparent)}
+.fd-pin.on.fd-po .fd-pv{box-shadow:0 0 0 2px var(--sheet),0 0 0 4.5px var(--eb),0 4px 12px color-mix(in srgb,var(--robt) 40%,transparent)}
+.fd-pin.on .fd-pv b{display:inline}
+.fd-pin:focus-visible .fd-pv,.fd-clu:focus-visible .fd-cl{outline:2px solid var(--eb);outline-offset:4px}
+/* a bubble of nearby pins: tap to zoom in on them */
+.fd-cl{position:absolute;left:0;top:0;width:36px;height:36px;transform:translate(-50%,-50%);border-radius:50%;background:var(--ink);color:var(--page);
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;
+  box-shadow:0 0 0 2px var(--sheet),0 3px 10px color-mix(in srgb,var(--robt) 30%,transparent)}
+.fd-cl::before{content:"";position:absolute;inset:-4px;border-radius:50%}
 .fd-me span{position:absolute;left:0;top:0;width:18px;height:18px;transform:translate(-50%,-50%);border-radius:50%;background:var(--eb);
   box-shadow:0 0 0 3px var(--sheet),0 0 0 10px color-mix(in srgb,var(--eb) 24%,transparent)}
 .fd-hpin span{position:absolute;left:0;top:0;width:34px;height:34px;transform:translate(-50%,-50%);border-radius:12px;background:var(--ink);color:var(--page);
   display:flex;align-items:center;justify-content:center;font-size:19px;box-shadow:0 0 0 2px var(--sheet)}
 
 @media (prefers-reduced-motion:reduce){
-  .fd-pv,.fd-card{transition:none}
+  .fd-pv{transition:none}
 }

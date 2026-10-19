@@ -23,6 +23,8 @@ const photosOf = p => {
 const nInside = p => arr(p && p.photos && p.photos.inside).length;
 const photoUrl = (id, size) => food().photo ? food().photo(id, size) : '';
 const hasLL = o => !!o && num(o.lat) != null && num(o.lon) != null;
+// The name as the food list shows it (no " - New York" on the end), from food.js when it's loaded.
+const nameOf = p => (typeof N.placeName === 'function' ? N.placeName(p) : '') || str(p && p.name);
 // One section failing must never take the whole page down.
 const safe = (fn, where) => { try { return fn(); } catch (e) { N.report(e, 'place ' + where); return ''; } };
 
@@ -34,7 +36,7 @@ const ios = () => /iPhone|iPad|Macintosh/.test(navigator.userAgent);
 // The place itself on a map (not directions).
 const placeUrl = p => {
   const ll = `${p.lat},${p.lon}`;
-  return ios() ? `https://maps.apple.com/?q=${encodeURIComponent(str(p.name) || 'Place')}&ll=${ll}`
+  return ios() ? `https://maps.apple.com/?q=${encodeURIComponent(nameOf(p) || 'Place')}&ll=${ll}`
     : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ll)}`;
 };
 const destOf = p => str(p.address) || (hasLL(p) ? {lat: p.lat, lon: p.lon} : null);
@@ -155,7 +157,7 @@ function statusRow(p) {
   const bits = distBits(p);
   const ask = !bits.some(b => b.t.endsWith('from you')) && canLocate() && hasLL(p) && !N.lastWhere();
   return h`${hoursChip(p)}${bits.map(b => h`<span class="pl-chip pl-dist">${icon(b.i)}${b.t}</span>`)}${ask
-    ? h`<button class="pl-chip pl-ask" data-act="locate">${icon('current-location')}How far from me?</button>` : ''}`;
+    ? h`<button class="pl-chip pl-ask" data-act="locate" aria-label="Distance from me">${icon('current-location')}<span>Distance</span></button>` : ''}`;
 }
 
 function gallery(p) {
@@ -164,7 +166,7 @@ function gallery(p) {
     return h`<div class="pl-none">${icon('photo')}<span>No photos saved for this place</span></div>`;
   }
   const inside0 = list.length - nInside(p);
-  const name = str(p.name) || 'this place';
+  const name = nameOf(p) || 'this place';
   return h`<div class="pl-galw">
     <div class="pl-gal" data-hscroll role="region" aria-label="${`Photos of ${name}`}">${list.map((x, i) => {
       const cap = str(x.cap);
@@ -179,7 +181,7 @@ function gallery(p) {
 }
 
 function heroHtml(p) {
-  const name = str(p.name) || 'Unnamed place';
+  const name = nameOf(p) || 'Unnamed place';
   const cuisine = arr(p.cuisine).map(str).filter(Boolean).slice(0, 3).join(' · ');
   // A 0 (or out-of-range) rating and a 0 review count mean "no rating", not "rated zero".
   let rating = num(p.rating), reviews = num(p.reviews);
@@ -205,16 +207,21 @@ function heroHtml(p) {
   </div>`;
 }
 
-function quickActs(p) {
+// The big buttons under the hero: [href, icon, label, aria].
+function actList(p) {
   const dest = destOf(p);
   const tel = telOf(p.phone), site = web(p.website), yelp = web(p.yelp), menu = web(p.menu);
   const acts = [];
-  if (dest) acts.push([N.mapsUrl(dest, 'w'), 'walk', 'Walk', `Walking directions to ${str(p.name)}`]);
-  if (dest) acts.push([N.mapsUrl(dest, 'r'), 'train', 'Transit', `Transit directions to ${str(p.name)}`]);
-  if (tel) acts.push([tel, 'phone', 'Call', `Call ${str(p.name)}`]);
-  if (site) acts.push([site, 'world', 'Website', `${str(p.name)} website`]);
-  else if (menu) acts.push([menu, 'receipt', 'Menu', `${str(p.name)} menu`]);
-  else if (yelp) acts.push([yelp, 'star', 'Yelp', `${str(p.name)} on Yelp`]);
+  if (dest) acts.push([N.mapsUrl(dest, 'w'), 'walk', 'Walk', `Walking directions to ${nameOf(p)}`]);
+  if (dest) acts.push([N.mapsUrl(dest, 'r'), 'train', 'Transit', `Transit directions to ${nameOf(p)}`]);
+  if (tel) acts.push([tel, 'phone', 'Call', `Call ${nameOf(p)}`]);
+  if (site) acts.push([site, 'world', 'Website', `${nameOf(p)} website`]);
+  else if (menu) acts.push([menu, 'receipt', 'Menu', `${nameOf(p)} menu`]);
+  else if (yelp) acts.push([yelp, 'star', 'Yelp', `${nameOf(p)} on Yelp`]);
+  return acts;
+}
+function quickActs(p) {
+  const acts = actList(p);
   if (!acts.length) return '';
   return h`<div class="${'pl-acts pl-n' + acts.length}">${acts.map(([href, i, t, aria]) =>
     h`<a class="pl-act" href="${href}" ${href.startsWith('tel:') ? '' : N.raw('target="_blank" rel="noopener"')} aria-label="${aria}">${icon(i)}<span>${t}</span></a>`)}</div>`;
@@ -229,8 +236,8 @@ function overview(p) {
   ].filter(f => f[2]);
   const good = arr(p.good_for).map(str).filter(Boolean);
   if (!sum && !facts.length && !good.length) return '';
-  return h`<section class="pl-sec">
-    <h2 class="h2">Overview</h2>
+  return h`<section class="sec pl-sec">
+    <h2 class="ey">Overview</h2>
     ${sum ? h`<p class="pl-sum">${sum}</p>` : ''}
     ${facts.length ? h`<div class="pl-facts">${facts.map(([i, k, v]) => h`<div class="pl-fact"><span class="pl-fi">${icon(i)}</span><div><small>${k}</small><span>${v}</span></div></div>`)}</div>` : ''}
     ${good.length ? h`<div class="pl-good"><span class="pl-lbl">Good for</span><div class="pl-chips">${good.map(g => h`<span class="pl-tag">${cap1(g)}</span>`)}</div></div>` : ''}
@@ -244,8 +251,8 @@ function toOrder(p) {
   if (!pop.length && !more.length) return '';
   const list = photosOf(p);
   const at = id => list.findIndex(x => x.id === id);
-  return h`<section class="pl-sec">
-    <h2 class="h2">What to order</h2>
+  return h`<section class="sec pl-sec">
+    <h2 class="ey">What to order</h2>
     ${pop.length ? h`<div class="pl-dishes" data-hscroll>${pop.map(d => {
       const id = typeof d.photo === 'string' && d.photo ? d.photo : null;
       const i = id ? at(id) : -1;
@@ -267,28 +274,45 @@ function opinions(p) {
   const tips = arr(p.tips).map(str).filter(Boolean);
   if (!loved.length && !watch.length && !tips.length) return '';
   const list = (items, i) => h`<ul class="pl-list">${items.map(t => h`<li>${icon(i)}<span>${cap1(t)}</span></li>`)}</ul>`;
-  return h`${loved.length || watch.length ? h`<section class="pl-sec pl-ops">
+  return h`${loved.length || watch.length ? h`<section class="sec pl-sec pl-ops">
       ${loved.length ? h`<div class="card tight pl-love"><h2 class="pl-h3">${icon('thumb-up')}People love</h2>${list(loved, 'check')}</div>` : ''}
       ${watch.length ? h`<div class="card tight sand pl-watch"><h2 class="pl-h3">${icon('alert-triangle')}Watch out</h2>${list(watch, 'point')}</div>` : ''}
     </section>` : ''}
-    ${tips.length ? h`<section class="pl-sec"><h2 class="h2">Tips</h2><ul class="pl-tips">${tips.map(t => h`<li><span class="pl-fi">${icon('bulb')}</span><span>${cap1(t)}</span></li>`)}</ul></section>` : ''}`;
+    ${tips.length ? h`<section class="sec pl-sec"><h2 class="ey">Tips</h2><ul class="pl-tips">${tips.map(t => h`<li><span class="pl-fi">${icon('bulb')}</span><span>${cap1(t)}</span></li>`)}</ul></section>` : ''}`;
 }
 
+// The week as rows, with runs of days that share hours joined ("Mon–Thu"), or one "Every day" row.
+function weekRows(p) {
+  const out = [];
+  for (const d of DAYS_ORDER) {
+    const t = dayText(p, d), last = out[out.length - 1];
+    if (last && last.t === t) last.days.push(d); else out.push({t, days: [d]});
+  }
+  if (out.length === 1) return [{t: out[0].t, label: 'Every day', days: out[0].days}];
+  const short = out.some(r => r.days.length > 1);
+  return out.map(r => ({...r, label: r.days.length > 1
+    ? `${N.dayName(r.days[0])}–${N.dayName(r.days[r.days.length - 1])}` : N.dayName(r.days[0], !short)}));
+}
 function hoursHtml(p) {
   const rows = validHours(p);
   const note = str(p.hours_note);
   if (!rows.length) {
-    return h`<section class="pl-sec"><h2 class="h2">Hours</h2>
+    return h`<section class="sec pl-sec"><h2 class="ey">Hours</h2>
       <div class="co plain">${icon('clock')}<span>Yelp doesn’t list hours for this place${note ? ` (${note})` : ''}. Call or check its website before you go.</span></div></section>`;
   }
   const today = N.nyNow().day;
-  return h`<section class="pl-sec"><h2 class="h2">Hours</h2>
+  const week = weekRows(p);
+  const tr = (cls, label, t) => h`<tr class="${N.cls(cls, t === 'Closed' && 'pl-off')}"><th scope="row">${label}</th><td>${t}</td></tr>`;
+  const head = week.length === 1
+    ? tr('pl-today', week[0].label, week[0].t)
+    : tr('pl-today', h`${N.dayName(today, true)}<span class="pl-tdy">Today</span>`, dayText(p, today));
+  return h`<section class="sec pl-sec"><h2 class="ey">Hours</h2>
     <div class="pl-hrs">
       <div class="pl-hnow" data-pl="hnow">${hoursChip(p)}<span class="pl-tz">New York time</span></div>
-      <table class="pl-tbl"><tbody>${DAYS_ORDER.map(d => {
-        const t = dayText(p, d);
-        return h`<tr class="${N.cls(d === today && 'pl-today', t === 'Closed' && 'pl-off')}"><th scope="row">${N.dayName(d, true)}${d === today ? h`<span class="pl-tdy">Today</span>` : ''}</th><td>${t}</td></tr>`;
-      })}</tbody></table>
+      <table class="pl-tbl"><tbody>${head}</tbody></table>
+      ${week.length > 1 ? h`<details class="pl-hall"><summary><span>All hours</span>${icon('chevron-down')}</summary>
+        <table class="pl-tbl"><tbody>${week.map(r => tr(r.days.includes(today) && 'pl-today', r.label, r.t))}</tbody></table>
+      </details>` : ''}
       ${note ? h`<p class="pl-note">${icon('info-circle')}<span>${note}</span></p>` : ''}
     </div></section>`;
 }
@@ -300,6 +324,8 @@ function detailsHtml(p) {
   const a = p.attrs && typeof p.attrs === 'object' ? p.attrs : {};
   const reserve = web(a.reserve_url), order = web(a.order_url);
   const tel = telOf(p.phone);
+  // anything already a button under the hero (Call, Website…) isn't repeated here
+  const shown = new Set(actList(p).map(a => a[0]));
   const links = [
     tel ? [tel, 'phone', str(p.phone), false] : null,
     menu ? [menu, 'receipt', 'Menu', true] : null,
@@ -307,20 +333,20 @@ function detailsHtml(p) {
     order ? [order, 'shopping-bag', 'Order online', true] : null,
     site ? [site, 'world', 'Website', true] : null,
     yelp ? [yelp, 'star', 'Open in Yelp', true] : null,
-  ].filter(Boolean);
+  ].filter(l => l && !shown.has(l[0]));
   // Two to a row; a long phone number gets a row of its own, and an odd one out at the end
   // fills its row rather than leaving a half-width button and a gap.
   const wide = links.map(([href, , t]) => href.startsWith('tel:') && t.length > 15);
   const halves = wide.map((w, i) => w ? -1 : i).filter(i => i >= 0);
   if (halves.length % 2) wide[halves[halves.length - 1]] = true;
   const ll = hasLL(p);
-  return h`<section class="pl-sec"><h2 class="h2">Details</h2>
-    ${chips.length ? h`<div class="pl-chips pl-attrs">${chips.map(([i, t, warn]) => h`<span class="${N.cls('pl-tag', warn && 'pl-warn')}">${icon(i)}${t}</span>`)}</div>`
+  return h`<section class="sec pl-sec"><h2 class="ey">Details</h2>
+    ${chips.length ? h`<ul class="pl-dets">${chips.map(([i, t, warn]) => h`<li class="${N.cls(warn && 'pl-warn')}">${icon(i)}<span>${t}</span></li>`)}</ul>`
       : h`<p class="pl-quiet">Yelp lists no extras (reservations, seating, payment) for this place.</p>`}
     <div class="pl-loc">
       ${ll ? h`<div class="pl-map">
         <div class="pl-mapc" data-pl="map" aria-hidden="true"></div>
-        <a class="pl-mapa" href="${placeUrl(p)}" target="_blank" rel="noopener" aria-label="${`Show ${str(p.name)} in Maps`}"></a>
+        <a class="pl-mapa" href="${placeUrl(p)}" target="_blank" rel="noopener" aria-label="${`Show ${nameOf(p)} in Maps`}"></a>
       </div>` : ''}
       <div class="pl-addr">
         <span class="pl-fi">${icon('map-pin')}</span>
@@ -367,7 +393,164 @@ function lbHtml(p, list) {
       ${str(x.cap) || i >= inside0 ? h`<figcaption>${i >= inside0 ? h`<b>Inside</b>` : ''}${str(x.cap)}</figcaption>` : ''}
     </figure>`)}</div>
     <button class="pl-lb-b pl-lb-prev" data-act="lbStep" data-arg="-1" aria-label="Previous photo">${icon('chevron-left')}</button>
-    <button class="pl-lb-b pl-lb-next" data-act="lbStep" data-arg="1" aria-label="Next photo">${icon('chevron-right')}</button>`;
+    <button class="pl-lb-b pl-lb-next" data-act="lbStep" data-arg="1" aria-label="Next photo">${icon('chevron-right')}</button>
+    <button class="pl-lb-done" data-act="lbDone" hidden>Done</button>`;
+}
+
+// Pinch or double-tap a photo to zoom in (a double-tap goes to 2.5x where you tapped), then drag to
+// look around; Done or another double-tap shows the whole photo again. Zoom belongs to the photo on
+// screen and is never kept. At 1x the track only scrolls sideways, and a swipe down of more than
+// 80px (or a flick) closes the viewer, the backdrop fading as the photo follows the finger.
+const ZOOM = 2.5, ZMAX = 4;
+function lbGestures(st) {
+  const {el, track} = st, done = N.$('.pl-lb-done', el);
+  let im = null, s = 1, tx = 0, ty = 0;   // the zoomed photo and its zoom
+  let g = null, tap = null, touched = 0, closing = 0;
+  const cur = () => st.imgs[st.idx];
+  // the photo's untransformed box and the size of the picture drawn in it (object-fit: contain)
+  const box = img => {
+    const r = img.parentElement.getBoundingClientRect(), bw = img.clientWidth || 1, bh = img.clientHeight || 1;
+    const k = img.naturalWidth && img.naturalHeight ? Math.min(bw / img.naturalWidth, bh / img.naturalHeight) : 1;
+    return {cx: r.left + img.offsetLeft + bw / 2, cy: r.top + img.offsetTop + bh / 2, bw, bh,
+      w: img.naturalWidth ? img.naturalWidth * k : bw, h: img.naturalHeight ? img.naturalHeight * k : bh};
+  };
+  // how far the zoomed picture can move before an edge comes away from the box edge
+  const room = b => [Math.max(0, (b.w * s - b.bw) / 2), Math.max(0, (b.h * s - b.bh) / 2)];
+  const give = (v, m) => v > m ? m + (v - m) / 3 : v < -m ? -m + (v + m) / 3 : v;
+  const paint = (anim = false) => {
+    if (!im) return;
+    im.style.transition = anim && !N.reduce ? 'transform .28s var(--ease)' : 'none';
+    im.style.transform = s === 1 && !tx && !ty ? '' : `translate3d(${tx}px,${ty}px,0) scale(${s})`;
+    el.classList.toggle('pl-lb-z', s > 1);
+    if (done && done.hidden !== s <= 1) {
+      // Done going away under the focus hands it to Close rather than losing it
+      if (s <= 1 && document.activeElement === done) { const x = N.$('.pl-lb-x', el); if (x) x.focus({preventScroll: true}); }
+      done.hidden = s <= 1;
+    }
+    if (s === 1 && !tx && !ty) im = null;
+  };
+  const unzoom = (anim = true) => { if (!im) return; s = 1; tx = ty = 0; paint(anim); };
+  const settle = () => {
+    if (s < 1.08) { s = 1; tx = ty = 0; }
+    else { s = Math.min(s, ZMAX); const [mx, my] = room(box(im)); tx = N.clamp(tx, -mx, mx); ty = N.clamp(ty, -my, my); }
+    paint(true);
+  };
+  // double-tap: in to 2.5x keeping the tapped spot under the finger, or back out
+  const toggle = (x, y) => {
+    const img = cur();
+    if (!img) return;
+    if (im) { unzoom(); return; }
+    im = img;
+    const b = box(img);
+    s = ZOOM;
+    const [mx, my] = room(b);
+    tx = N.clamp((b.cx - x) * (ZOOM - 1), -mx, mx); ty = N.clamp((b.cy - y) * (ZOOM - 1), -my, my);
+    paint(true);
+  };
+  // swipe down at 1x: the photo follows the finger and the backdrop and controls fade
+  const pull = (dx, dy) => {
+    const k = Math.min(1, dy / 400);
+    const img = cur();
+    if (img) { img.style.transition = 'none'; img.style.transform = `translate3d(${dx}px,${dy}px,0) scale(${1 - k * .2})`; }
+    el.style.setProperty('--pl-fade', String(1 - Math.min(.85, dy / 320)));
+  };
+  const letGo = close => {
+    const img = cur();
+    el.classList.remove('pl-lb-live');
+    if (close) {
+      if (N.reduce) { closeLb(); return; }
+      el.style.setProperty('--pl-fade', '0');
+      if (img) { img.style.transition = 'transform .22s ease-in'; img.style.transform = `translate3d(0,${innerHeight}px,0) scale(.8)`; }
+      closing = setTimeout(() => { if (lb === st) closeLb(); }, 220);
+      return;
+    }
+    el.classList.remove('pl-lb-bare');
+    el.style.setProperty('--pl-fade', '1');
+    if (img) { img.style.transition = N.reduce ? 'none' : 'transform .28s var(--ease)'; img.style.transform = ''; }
+  };
+  const pts = ev => [...ev.touches].map(t => [t.clientX, t.clientY]);
+  const mid = p => [(p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2];
+  const gap = p => Math.max(1, Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]));
+  const down = ev => {
+    touched = performance.now();
+    if (closing) return;
+    const p = pts(ev), img = cur();
+    if (!img) return;
+    if (p.length === 2) {
+      if (g && g.k === 'drop') letGo(false);
+      if (im !== img) { unzoom(false); im = img; }
+      // keep the photo square on screen and the spot between the fingers under them
+      track.scrollLeft = st.idx * track.clientWidth;
+      const b = box(img), m = mid(p);
+      g = {k: 'pinch', b, d0: gap(p), s0: s, px: (m[0] - b.cx - tx) / s, py: (m[1] - b.cy - ty) / s};
+      return;
+    }
+    g = p.length === 1 ? {k: '', x0: p[0][0], y0: p[0][1], tx0: tx, ty0: ty, t0: touched, t: touched, dx: 0, dy: 0, vy: 0} : null;
+  };
+  const move = ev => {
+    if (!g) return;
+    const p = pts(ev);
+    if (g.k === 'pinch') {
+      if (p.length < 2) return;
+      if (ev.cancelable) ev.preventDefault();
+      const m = mid(p);
+      s = N.clamp(g.s0 * gap(p) / g.d0, .7, ZMAX * 1.25);
+      tx = m[0] - g.b.cx - s * g.px; ty = m[1] - g.b.cy - s * g.py;
+      paint();
+      return;
+    }
+    if (p.length !== 1) return;
+    const dx = p[0][0] - g.x0, dy = p[0][1] - g.y0;
+    if (!g.k) {
+      if (Math.hypot(dx, dy) < 8) return;
+      g.k = im && im === cur() ? 'pan' : dy > Math.abs(dx) ? 'drop' : 'none';
+      if (g.k === 'drop') el.classList.add('pl-lb-live', 'pl-lb-bare');
+    }
+    if (g.k === 'none') return;
+    if (ev.cancelable) ev.preventDefault();
+    if (g.k === 'pan') {
+      const [mx, my] = room(box(im));
+      tx = give(g.tx0 + dx, mx); ty = give(g.ty0 + dy, my);
+      paint();
+      return;
+    }
+    const now = performance.now();
+    g.vy = .7 * (dy - g.dy) / Math.max(1, now - g.t) + .3 * g.vy;
+    g.dx = dx; g.dy = dy; g.t = now;
+    pull(dx, Math.max(0, dy));
+  };
+  const up = ev => {
+    const d = g;
+    if (!d) return;
+    if (d.k === 'pinch') { g = null; settle(); return; }
+    if (ev.touches.length) return;
+    g = null;
+    if (d.k === 'pan') settle();
+    else if (d.k === 'drop') letGo(ev.type !== 'touchcancel' && (d.dy > 80 || (d.vy > .5 && d.dy > 24 && performance.now() - d.t < 80)));
+    else if (!d.k && ev.type === 'touchend' && performance.now() - d.t0 < 300) {
+      const now = performance.now();
+      if (tap && now - tap.t < 320 && Math.hypot(tap.x - d.x0, tap.y - d.y0) < 30) { tap = null; toggle(d.x0, d.y0); }
+      else tap = {x: d.x0, y: d.y0, t: now};
+    }
+  };
+  // a mouse double-click does what a double-tap does
+  const dbl = ev => { if (performance.now() - touched > 800) toggle(ev.clientX, ev.clientY); };
+  const opt = {passive: false};
+  track.addEventListener('touchstart', down, {passive: true});
+  track.addEventListener('touchmove', move, opt);
+  track.addEventListener('touchend', up);
+  track.addEventListener('touchcancel', up);
+  track.addEventListener('dblclick', dbl);
+  st.unzoom = unzoom;
+  st.zoomed = () => !!im;
+  return () => {
+    clearTimeout(closing);
+    track.removeEventListener('touchstart', down, {passive: true});
+    track.removeEventListener('touchmove', move, opt);
+    track.removeEventListener('touchend', up);
+    track.removeEventListener('touchcancel', up);
+    track.removeEventListener('dblclick', dbl);
+  };
 }
 function openLb(p, idx, instant = false) {
   closeLb(true);
@@ -379,7 +562,7 @@ function openLb(p, idx, instant = false) {
   el.className = 'pl-lb' + (instant || N.reduce ? '' : ' pl-lb-in');
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-modal', 'true');
-  el.setAttribute('aria-label', `Photos of ${str(p.name) || 'this place'}`);
+  el.setAttribute('aria-label', `Photos of ${nameOf(p) || 'this place'}`);
   el.innerHTML = String(lbHtml(p, list));
   app.appendChild(el);
   const track = N.$('.pl-lb-track', el), imgs = N.$$('img', track);
@@ -391,26 +574,28 @@ function openLb(p, idx, instant = false) {
     i = N.clamp(i, 0, st.n - 1);
     for (const j of [i, i + 1, i - 1]) { const im = imgs[j]; if (im && !im.getAttribute('src') && im.dataset.src) im.src = im.dataset.src; }
     if (i === st.idx) return;
+    if (st.unzoom) st.unzoom(false);
     st.idx = i;
     const n = N.$('[data-pl="lbn"]', el); if (n) n.textContent = `${i + 1} / ${st.n}`;
     N.$('.pl-lb-prev', el).disabled = i === 0;
     N.$('.pl-lb-next', el).disabled = i === st.n - 1;
   };
   st.show = show;
+  st.off.push(lbGestures(st));
   track.scrollLeft = idx * track.clientWidth;
   show(idx);
   let raf = 0;
   const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => show(Math.round(track.scrollLeft / Math.max(1, track.clientWidth)))); };
   track.addEventListener('scroll', onScroll, {passive: true});
   // Keep the photo in place when the phone rotates or the window resizes.
-  const onResize = () => { track.scrollLeft = st.idx * track.clientWidth; };
+  const onResize = () => { st.unzoom(false); track.scrollLeft = st.idx * track.clientWidth; };
   window.addEventListener('resize', onResize);
   const onKey = ev => {
-    if (ev.key === 'Escape') { ev.preventDefault(); closeLb(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); if (st.zoomed()) st.unzoom(); else closeLb(); }
     else if (ev.key === 'ArrowRight') { ev.preventDefault(); stepLb(1); }
     else if (ev.key === 'ArrowLeft') { ev.preventDefault(); stepLb(-1); }
     else if (ev.key === 'Tab') {
-      const f = N.$$('button', el).filter(b => !b.disabled);
+      const f = N.$$('button', el).filter(b => !b.disabled && !b.hidden);
       if (!f.length) return;
       const k = f.indexOf(document.activeElement);
       ev.preventDefault();
@@ -426,6 +611,7 @@ function stepLb(d) {
   if (!lb) return;
   const i = N.clamp(lb.idx + d, 0, lb.n - 1);
   if (i === lb.idx) return;
+  lb.unzoom(false);
   lb.track.scrollTo({left: i * lb.track.clientWidth, behavior: N.reduce ? 'auto' : 'smooth'});
 }
 // quiet: closing because the page is re-rendering or leaving (no focus moves).
@@ -479,7 +665,7 @@ async function drawMap(box, p, alive) {
   const tiles = tilesOk(t);
   const map = L.map(box, {zoomControl: false, dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false,
     boxZoom: false, keyboard: false, tap: false, inertia: false, zoomSnap: .25, fadeAnimation: false, zoomAnimation: false});
-  map.attributionControl.setPrefix(false);
+  map.attributionControl.setPrefix(false).setPosition('bottomleft');
   map.setView([p.lat, p.lon], tiles ? 15.75 : 15);
   map.panBy([0, -22], {animate: false}); // the pin stands above its point, so nudge it to look centred
   const pane = map.createPane('plBase');
@@ -520,7 +706,7 @@ N.screen('place', {
   // repaint, so without it the theme switch and N.rerender() skip this screen
   // (and the map would keep the old theme's colours).
   uses: ['food', 'trip', 'force'],
-  title: ctx => { const p = placeFor(ctx); return p && str(p.name) || 'Place'; },
+  title: ctx => { const p = placeFor(ctx); return p && nameOf(p) || 'Place'; },
   render(ctx) {
     const p = placeFor(ctx);
     if (!p) return missing();
@@ -611,6 +797,7 @@ N.screen('place', {
   actions: {
     photo(el, ev, ctx, arg) { const p = placeFor(ctx); if (p) openLb(p, +arg || 0); },
     lbClose() { closeLb(); },
+    lbDone() { if (lb) lb.unzoom(); },
     lbStep(el, ev, ctx, arg) { stepLb(+arg || 1); },
     async locate(el) {
       if (el.disabled) return;
@@ -626,7 +813,7 @@ N.screen('place', {
       else if (p && hasLL(p) && food().away && food().away(p) > FAR) N.toast('You’re not in New York yet. Distances show once you’re there.');
       const box = N.$('[data-pl="stat"]');
       if (p && box) box.innerHTML = String(safe(() => statusRow(p), 'status'));
-      if (el.isConnected) { el.disabled = false; if (label) label.textContent = 'How far from me?'; }
+      if (el.isConnected) { el.disabled = false; if (label) label.textContent = 'Distance'; }
     },
   },
 });
