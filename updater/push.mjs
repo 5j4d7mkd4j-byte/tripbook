@@ -252,6 +252,7 @@ export function payload(m, at = new Date().toISOString()) {
   return json;
 }
 
+export const topicOf = tag => crypto.createHash('sha256').update(String(tag), 'utf8').digest('hex').slice(0, 32);
 export function headers(m, jwt, vapid) {
   const ttl = m.ttl == null || m.ttl === '' || !Number.isFinite(+m.ttl) ? 3600 : Math.max(0, Math.min(2419200, Math.round(+m.ttl)));
   const h = {
@@ -261,10 +262,11 @@ export function headers(m, jwt, vapid) {
     'Content-Type': 'application/octet-stream',
     'Authorization': `vapid t=${jwt}, k=${vapid.pub}`,
   };
-  // A newer message with the same Topic replaces an undelivered older one. It is the
-  // tag the phone sees, when that fits RFC 8030 (Apple answers 400 BadWebPushTopic otherwise).
+  // A newer message with the same Topic replaces an undelivered older one. Apple refuses
+  // some tags that fit RFC 8030's alphabet (400 BadWebPushTopic for a 13-character one), so
+  // the Topic is the first 32 hex of the tag's sha256: the same tag always gives the same Topic.
   const tag = clean(m.tag, 64);
-  if (/^[A-Za-z0-9_-]{1,32}$/.test(tag)) h['Topic'] = tag;
+  if (tag) h['Topic'] = topicOf(tag);
   return h;
 }
 
@@ -330,6 +332,12 @@ async function toDevice(d, msgs, vapid, jwtFor, tally, per, opts) {
         await sleep(wait * 1000);
         r = await post(d.endpoint, hdrs, body, Math.min(opts.timeout, left()));
       }
+    }
+    // A refused Topic costs only the coalescing: send it again without one.
+    if (r.status === 400 && r.reason === 'BadWebPushTopic' && hdrs.Topic && left() >= 1000) {
+      tally.retried++;
+      const {Topic, ...rest} = hdrs;
+      r = await post(d.endpoint, rest, body, Math.min(opts.timeout, left()));
     }
     out.status = r.status;
     if (r.reason) out.reason = r.reason;

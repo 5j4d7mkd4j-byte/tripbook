@@ -178,7 +178,7 @@ def label(p):
 
 
 def safe_tag(s):
-    """push.mjs sets the Topic header (one notification per tag) only for [A-Za-z0-9_-]{1,32}."""
+    """The tag the phone sees (one notification per tag); push.mjs derives the Topic header from it."""
     return re.sub(r"[^A-Za-z0-9_-]", "", str(s))[:32] or "alert"
 
 

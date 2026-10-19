@@ -283,9 +283,10 @@ const server = http.createServer((req, res) => {
     const name = req.url.split('/').pop();
     const n = hits[name] = (hits[name] || 0) + 1;
     seen.push({name, n, t: Date.now(), headers: req.headers, body: Buffer.concat(chunks)});
-    const status = {ok: 201, gone: 410, denied: 403, big: 413, busy: n === 1 ? 429 : 201}[name] || 404;
+    const status = {ok: 201, gone: 410, denied: 403, big: 413, busy: n === 1 ? 429 : 201,
+                    picky: req.headers.topic ? 400 : 201}[name] || 404;
     res.writeHead(status, status === 429 ? {'retry-after': '1'} : {'content-type': 'application/json'});
-    res.end(status === 403 ? '{"reason":"BadJwtToken"}' : '');
+    res.end(status === 403 ? '{"reason":"BadJwtToken"}' : status === 400 ? '{"reason":"BadWebPushTopic"}' : '');
   });
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -351,10 +352,12 @@ await test('d. request headers and a VAPID JWT for the push service origin', () 
   }
   assert.equal(m1.headers.ttl, '3600');
   assert.equal(m1.headers.urgency, 'high');
-  assert.equal(m1.headers.topic, 't1-gate');
+  assert.equal(m1.headers.topic, P.topicOf('t1-gate'));
+  assert.match(m1.headers.topic, /^[0-9a-f]{32}$/, 'a Topic Apple takes: 32 hex');
   assert.equal(m2.headers.ttl, '900');
   assert.equal(m2.headers.urgency, 'normal');
-  assert.equal(m2.headers.topic, undefined, 'no Topic for a tag outside the base64url alphabet');
+  assert.equal(m2.headers.topic, P.topicOf('not a valid topic!'), 'any tag gets a valid Topic');
+  assert.notEqual(m1.headers.topic, m2.headers.topic);
 });
 
 await test('d. each phone decrypts its messages, in order', async () => {
@@ -373,6 +376,17 @@ await test('d. local stderr names devices by id and host only', () => {
   assert.match(first.err, new RegExp(`${phones.ok.id} 127\\.0\\.0\\.1:\\d+ 201 201|${phones.ok.id} 127\\.0\\.0\\.1:\\d+ 201`));
   for (const p of ALL) assert.ok(!first.err.includes(new URL(p.endpoint).pathname), 'no endpoint path');
   for (const m of MSGS) assert.ok(!first.err.includes(m.title) && !first.err.includes(m.body));
+});
+
+await test('d. a refused Topic is sent again without one', async () => {
+  reset();
+  const picky = await phone(`${ORIGIN}/push/picky`);
+  const r = await run(PUSH, ['send', '--json'], {env: {PUSH_SUBS: picky.code}, input: JSON.stringify(MSGS.slice(0, 1))});
+  assert.equal(r.code, 0, r.err);
+  const out = JSON.parse(r.out);
+  assert.deepEqual([out.sent, out.failed, out.retried], [1, 0, 1]);
+  assert.deepEqual(seen.map(s => !!s.headers.topic), [true, false]);
+  assert.equal(seen[0].body.toString('base64'), seen[1].body.toString('base64'), 'the same message again');
 });
 
 await test('d. devices, --only, --skip, dedupe and unreadable codes', async () => {
