@@ -1,9 +1,15 @@
 /* Airports: the one you are at or heading to (#airports) and each airport by
-   code (#airport/phx|clt|lga). Hero with the giant code, conditions tiles,
-   what matters now, your flights here, the steps through the airport with
-   real times, a zoomable terminal map with your gate and walking route, then
-   security, food near your gate, services, ground transport, facts, tips and
-   links.
+   code (#airport/phx|clt|lga). Map first. The hero says where you are going
+   (your gate, or the terminal and "Gate TBD"); under it, From and To and the
+   walking route on the airport's own indoor map (N.airmap), started from where
+   you are once you are there. Then the steps with real times, your flights
+   here, getting there or out, food along the route, and the airport's
+   reference sections, folded.
+   The airport, the visit and the route pick themselves from the clock and,
+   when you allow it, your location: within about 5 km of an airport wins.
+   Your location, N.airportRoute (from an old #nav link) and the From/To you
+   choose stay in memory only; only the Hotel/Home and How choice on an
+   arrival is saved, on this phone.
    Seats come only from leg.seats (the Wallet, merged by the model) and are
    only shown on this phone; nothing from the Wallet goes into a link. */
 (() => {
@@ -80,11 +86,12 @@ function codes() {
   Object.keys(ga).forEach(c => { if (/^[A-Z]{3}$/.test(c) && !out.includes(c)) out.push(c); });
   return (out.length ? out : DEFAULT_CODES.slice()).slice(0, 4);
 }
-// The airport that matters now: PHX before the trip and on the leave
-// morning, CLT once the first flight is off, LGA after landing and on the
-// return day, then back along the return.
+// The airport that matters now: the one you're at (a recent fix within about 5 km)
+// first; else by the clock: PHX before the trip and on the leave morning, CLT once
+// the first flight is off, LGA after landing and on the return day, then back along the return.
 function autoCode() {
   const list = codes();
+  const nc = nearCode(list); if (nc) return nc;
   const ph = phase();
   let c = null;
   if (ph === 'out' || ph === 'ret') {
@@ -188,26 +195,274 @@ function secTime(code, v) {
   const m = rel && rel.to === 'dep' && Number.isFinite(+rel.min) ? +rel.min : -90;
   return N.addMin(v.out.dep.time, m);
 }
+// Checkpoints and lanes shut when you reach security (your security time on a departure, else now), so the
+// route goes through one that is open. Hours that cannot be read count as open.
+function shutAt(P, code, v) {
+  if (!P) return [];
+  const st = secTime(code, v), m = localMin(st && T(st) > nowMs() ? st : N.now().toISOString(), code);
+  if (m == null) return [];
+  return arr(P.data && P.data.pois).filter(q => q && ['checkpoint', 'precheck', 'clear'].includes(q.cat)
+    && openAt(hoursRange(q.hours), m) === false).map(q => q.id).sort();
+}
+// The checkpoint the guide's security step sends you through ("Security at Checkpoint A"), while it is open.
+function guideCp(P, code, v) {
+  const s = secStep(code), x = s && str(s.title).match(/\bcheckpoint\s+([A-Z0-9]{1,2})\b/i);
+  if (!P || !x) return null;
+  const qs = arr(P.data && P.data.pois).filter(q => q && q.cat === 'checkpoint' && q.node && lc(shortN(q.n)) === lc(`checkpoint ${x[1]}`));
+  return qs.length === 1 && !shutAt(P, code, v).includes(qs[0].id) ? 'poi:' + qs[0].id : null;
+}
+
+
+// ---------- the indoor map, where you are, and the route ----------
+const normG = g => str(g).toUpperCase().replace(/\bGATE\b/g, '').replace(/\s+/g, '').replace(/^([A-Z]*)0+(\d)/, '$1$2');
+// Indoor maps by code (N.airmap.load): the prepared map, null when there is none on this
+// phone, undefined until tried. centers[] is each map's middle, for "which airport am I at".
+const Ps = {}, triedAt = {}, centers = {};
+const pair = c => { c = arr(c); return c.length >= 2 && Number.isFinite(+c[0]) && Number.isFinite(+c[1]) ? [+c[0], +c[1]] : null; };
+function keepP(code, P) {
+  Ps[code] = P || null;
+  triedAt[code] = Date.now();
+  const c = pair(P && P.data ? P.data.center : null);   // [lon, lat]
+  if (c) centers[code] = {lat: c[1], lon: c[0]};
+}
+// The guide's walking map has [lat, lon]; the indoor map [lon, lat].
+function centerOf(code) {
+  const g = guide(code), c = pair(g && obj(g.nav) ? g.nav.center : null);
+  return c ? {lat: c[0], lon: c[1]} : centers[code] || null;
+}
+// A fix's age against the phone clock and the app clock (a test clock can differ).
+const fixAge = w => !w || !Number.isFinite(+w.at) ? Infinity : Math.min(Math.abs(Date.now() - w.at), Math.abs(nowMs() - w.at));
+function here(maxAge) {
+  let w = null;
+  try { w = N.lastWhere ? N.lastWhere() : null; } catch (e) { w = null; }
+  return w && Number.isFinite(+w.lat) && Number.isFinite(+w.lon) && fixAge(w) <= maxAge ? w : null;
+}
+const distTo = (w, code) => {
+  const c = centerOf(code);
+  if (!w || !c) return Infinity;
+  try { const d = N.dist({lat: +w.lat, lon: +w.lon}, c); return Number.isFinite(d) ? d : Infinity; } catch (e) { return Infinity; }
+};
+const asked = new Set();
+const onAirports = () => { const c = N.current && N.current(); return !!(c && c.def) && /^airports?$/.test(c.def.name); };
+// An airport with no guide centre gets one from its indoor map, once.
+function wantCenter(code) {
+  if (asked.has(code) || !N.airmap || Ps[code] !== undefined) return;
+  asked.add(code);
+  N.airmap.load(code).then(P => { keepP(code, P); if (P && centers[code] && onAirports()) N.rerender(); }).catch(() => {});
+}
+// The trip airport you are at: a fix from the last 45 min within 5 km of it.
+function nearCode(list) {
+  const w = here(45 * 60000);
+  if (!w) return null;
+  let best = null, bd = 5000;
+  for (const c of list) { const d = distTo(w, c); if (d < bd) { bd = d; best = c; } }
+  if (!best) list.forEach(c => { if (!centerOf(c)) wantCenter(c); });
+  return best;
+}
+
+// Endpoints are the map's own tokens: 'gate:B11', 'place:baggage', 'poi:<id>' or {pt, level, label}.
+const hasPlace = (P, k) => !!P && N.airmap.places(P).some(x => x.kind === k);
+const firstPlace = (P, kinds) => { const k = kinds.find(x => !P || hasPlace(P, x)); return k ? 'place:' + k : null; };
+// A trip gate as a map ref: exact, else without its letter ("C11" on a map that numbers
+// its gates 11, 12…), preferring the concourse with that letter.
+function gref(P, gate) {
+  const g = normG(gate);
+  if (!g) return null;
+  if (!P) return 'gate:' + g;
+  const refs = [...P.gateByRef.keys()];
+  const ex = refs.find(r => normG(r) === g);
+  if (ex) return 'gate:' + ex;
+  const m = g.match(/^([A-Z]*)(\d+[A-Z]?)$/);
+  if (!m) return null;
+  const L = m[1], bare = m[2];
+  const conc = r => str((P.gateByRef.get(r) || {}).c).toUpperCase();
+  const inC = r => !L || new RegExp(`(^|[^A-Z])${L}([^A-Z]|$)`).test(conc(r));
+  // A concourse named by a different single letter rules a gate out; a named one ("Eastern") does not.
+  const other = r => !!L && /^[A-Z]$/.test(conc(r)) && conc(r) !== L;
+  const one = xs => { xs = xs.filter(r => !other(r)); const a = xs.filter(inC); return a.length === 1 ? a[0] : !a.length && xs.length === 1 ? xs[0] : null; };
+  const r = one(refs.filter(x => normG(x) === bare)) || one(refs.filter(x => normG(x).replace(/^[A-Z]+/, '') === bare));
+  return r ? 'gate:' + r : null;
+}
+// The carousel the airline posted, when the map names it ("Carousel 5", "Baggage claim 5"), else the nearest one.
+function bagRef(P, n) {
+  n = str(n).trim().toUpperCase();
+  if (!P || !n) return 'place:baggage';
+  const num = q => { const x = str(q.n).trim().toUpperCase().match(/(?:^|\s)([A-Z]?\d+[A-Z]?)$/); return x ? x[1] : ''; };
+  const qs = arr(P.data && P.data.pois).filter(q => q && q.cat === 'baggage' && q.node && num(q) === n);
+  const q = qs.find(x => !/international/i.test(str(x.n))) || (qs.length === 1 ? qs[0] : null);
+  return q ? 'poi:' + q.id : 'place:baggage';
+}
+const KIND_LABEL = {curb_dep: 'Departures curb', curb_arr: 'Arrivals curb', checkin: 'Check-in', checkpoint: 'Security', baggage: 'Baggage claim',
+  rideshare: 'Rideshare pickup', taxi: 'Taxi stand', bus: 'Bus stop', shuttle: 'Shuttle', train: 'Train', subway: 'Subway', parking: 'Parking',
+  rental_car: 'Rental cars', exit: 'Exit'};
+// How you leave on an arrival: [id, label, icon].
+const HOW = [['rideshare', 'Rideshare', 'car-suv'], ['taxi', 'Taxi', 'car'], ['transit', 'Transit', 'train'], ['pickup', 'Pickup', 'users']];
+function exitKinds(how, out) {
+  if (how === 'rideshare') return ['rideshare', 'curb_arr', 'exit'];
+  if (how === 'taxi') return ['taxi', 'curb_arr', 'exit'];
+  if (how === 'pickup') return ['curb_arr', 'exit'];
+  const r = out ? transitPick('hotel') : null;
+  return r && /bus|\bq\d+|\bm\d+/i.test(str(r.name)) ? ['bus', 'train', 'subway', 'shuttle', 'curb_arr', 'exit'] : ['train', 'subway', 'bus', 'shuttle', 'curb_arr', 'exit'];
+}
+// Map overlays, off until you turn them on: [id, label, icon, the map's chip ids].
+const OVER = [['food', 'Food', 'tools-kitchen-2', ['food', 'coffee']], ['restroom', 'Restrooms', 'toilet-paper', ['restroom']], ['water', 'Water', 'droplet', ['water']]];
+const POI_IC = {food: 'tools-kitchen-2', bar: 'glass-cocktail', coffee: 'coffee', restroom: 'toilet-paper', water: 'droplet', shop: 'shopping-bag'};
+const fmtM = m => m < 1000 ? `${Math.max(10, Math.round(m / 10) * 10)} m` : `${(m / 1000).toFixed(1)} km`;
+const lvName = (P, l) => { const x = P && P.levels.get(l); return x ? `Level ${x.short || x.id}` : ''; };
+
+// Where you head after landing (Hotel or Home) and how: saved on this phone per airport.
+function exitPref(code, v) {
+  let all = null;
+  try { all = obj(N.get('nyc.ap.exit', null)); } catch (e) { all = null; }
+  const saved = obj(all && all[code]) || {};
+  const dir = v ? v.dir : 'out';
+  const to = saved.to === 'home' || saved.to === 'hotel' ? saved.to : dir === 'ret' ? 'home' : 'hotel';
+  let how = HOW.some(x => x[0] === saved.how) ? saved.how : '';
+  if (!how) {
+    if (to === 'home') how = 'pickup';
+    else {
+      const r = dir === 'out' ? transitPick('hotel') : null, n = str(r && r.name);
+      how = /taxi|cab/i.test(n) ? 'taxi' : /bus|train|subway|rail|metro|express|\bq\d+|\bm\d+/i.test(n) ? 'transit' : 'rideshare';
+    }
+  }
+  return {to, how, set: !!saved.how};
+}
+// "About 45–60 min to the hotel by …": Transit's own figure, else the guide's ground row.
+function exitEta(code, v, ex) {
+  if (!v || v.role !== 'arrive' || ex.to !== 'hotel' || v.dir !== 'out' || ex.how === 'pickup') return '';
+  if (ex.how === 'transit') {
+    const r = transitPick('hotel'), m = r ? minsTxt(r.range || r.mins) : '';
+    return m ? `About ${m} to the hotel by ${r.name}` : '';
+  }
+  const g = guide(code), want = ex.how === 'taxi' ? ['taxi', 'car'] : ['rideshare', 'car'];
+  const x = arr(g && g.ground).filter(obj).find(r => want.includes(lc(r.mode)));
+  const mn = x ? arr(x.min).filter(n => Number.isFinite(+n)) : [];
+  return mn.length ? `About ${mn[0]}${mn[1] != null && +mn[1] !== +mn[0] ? `–${mn[1]}` : ''} min by ${ex.how === 'taxi' ? 'taxi' : 'car'}` : '';
+}
+// The route this visit needs, before you choose anything.
+function defaults(P, code, v, qG, bags, ex) {
+  const d = {from: null, to: null, via: [], tbd: false, off: false, gate: ''};
+  if (!v) {
+    if (qG) {
+      d.gate = qG;
+      d.from = firstPlace(P, ['curb_dep', 'checkin', 'checkpoint']);
+      d.to = gref(P, qG);
+      d.off = !!P && !d.to;
+    }
+    return d;
+  }
+  if (v.role === 'arrive') {
+    const gi = gref(P, v.inn.arr.gate);
+    const bg = firstPlace(P, ['baggage']) && bagRef(P, v.inn.arr.baggage);
+    d.from = gi || bg;
+    d.to = firstPlace(P, exitKinds(ex.how, v.dir === 'out'));
+    if (bags > 0 && gi && bg) d.via = [bg];
+    return d;
+  }
+  d.from = v.role === 'connect' ? gref(P, v.inn.arr.gate) : firstPlace(P, ['curb_dep', 'checkin', 'checkpoint']);
+  d.gate = str(v.out.dep.gate) || qG;
+  d.to = gref(P, d.gate) || (v.role === 'depart' ? guideCp(P, code, v) || firstPlace(P, ['checkpoint']) : null);
+  if (v.role === 'depart' && bags > 0 && hasPlace(P, 'checkin') && d.from !== 'place:checkin'
+    && (!okT(v.out.dep.time) || nowMs() < T(N.addMin(v.out.dep.time, -N.AA.bagdrop)))) d.via = ['place:checkin'];
+  d.tbd = !d.gate;
+  d.off = !!d.gate && !!P && !gref(P, d.gate);
+  return d;
+}
+const epKey = x => x && typeof x === 'object' ? `pt:${(+x.pt[0]).toFixed(5)},${(+x.pt[1]).toFixed(5)},${x.level}` : str(x);
+// Routes are cached so the same From/To gives the same object (the map skips a redraw).
+const RC = new Map();
+function routeFor(P, from, to, via, shut) {
+  if (!P || !from || !to || !N.airmap) return null;
+  via = arr(via); shut = arr(shut);
+  const k = `${P.code}|${epKey(from)}|${epKey(to)}|${via.join(',')}|${shut.join(',')}`;
+  if (RC.has(k)) return RC.get(k);
+  let R = null;
+  try {
+    R = N.airmap.route(P, from, to, {via, tsa: 'std', shut});
+    if (!R && via.length) R = N.airmap.route(P, from, to, {tsa: 'std', shut});
+  } catch (e) { N.report(e, 'airports route'); R = null; }
+  if (RC.size > 40) RC.clear();
+  RC.set(k, R);
+  return R;
+}
+// A chosen endpoint (or an old #nav link's) as a map token; undefined means "use the default".
+function tok(P, v, x) {
+  if (x == null || x === '') return undefined;
+  if (typeof x === 'object') return x;
+  const s = str(x).trim();
+  if (s === '@arr') return (v && v.inn && gref(P, v.inn.arr.gate)) || undefined;
+  if (s === '@dep') return (v && v.out && gref(P, v.out.dep.gate)) || undefined;
+  if (s === '@bag') return 'place:baggage';
+  if (s === '@here' || !s) return undefined;
+  if (s.includes(':')) return s;
+  if (KIND_LABEL[s]) return 'place:' + s;
+  if (/^[A-Z]{0,2}\d{1,3}[A-Z]?$/i.test(s)) return gref(P, s) || undefined;
+  return 'poi:' + s;
+}
+const shortN = s => str(s).replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+function epLabel(P, x, stop) {
+  if (!x) return 'Choose';
+  if (typeof x === 'object') return str(x.label) || 'Your location';
+  if (stop && stop.kind === 'pt') return 'Your location';
+  // A bare "Door" says less than the kind of place it is ("Departures curb").
+  if (stop && stop.label) { const l = shortN(stop.label) || stop.label; return /^(doors?|entrance|exit)$/i.test(l) && KIND_LABEL[stop.kind] ? KIND_LABEL[stop.kind] : l; }
+  const s = str(x), i = s.indexOf(':'), pre = i > 0 ? s.slice(0, i) : '', rest = i > 0 ? s.slice(i + 1) : s;
+  if (pre === 'gate') return `Gate ${rest}`;
+  if (pre === 'place') return KIND_LABEL[rest] || rest.replace(/_/g, ' ');
+  if (pre === 'poi') { const q = P && P.poiById.get(rest); return q ? shortN(q.n) || 'Place' : 'Place'; }
+  return s;
+}
+
+const sel = {};   // `${code}|${visit}` → {from, to, via} chosen on this phone (memory only)
+// Everything the map, the hero and the route list need, worked out once per paint.
+function plan(ctx) {
+  const code = codeOf(ctx), list = visitsOf(code), v = curVisit(code, list);
+  const P = Ps[code] || null, qG = qGate(ctx);
+  let bags = 0;
+  try { const w = N.wallet ? N.wallet() : null; bags = w && Number.isFinite(+w.bags) ? +w.bags : 0; } catch (e) { bags = 0; }
+  const ex = exitPref(code, v);
+  const d = defaults(P, code, v, qG, bags, ex);
+  const k = `${code}|${v ? v.key : ''}`, s = sel[k] || {};
+  const pf = tok(P, v, s.from), pt = tok(P, v, s.to);
+  const userFrom = pf !== undefined, userTo = pt !== undefined;
+  let from = userFrom ? pf : d.from;
+  const to = userTo ? pt : d.to;
+  let via = s.via ? arr(s.via).map(x => tok(P, v, x)).filter(Boolean) : userFrom || userTo ? [] : d.via;
+  const shut = shutAt(P, code, v);
+  let R = P ? routeFor(P, from, to, via, shut) : null;
+  let you = null, fromHere = false;
+  const w = here(10 * 60000);
+  if (w && P && distTo(w, code) <= 3000) {
+    const acc = Number.isFinite(+w.acc) ? +w.acc : 30;
+    you = {lon: +w.lon, lat: +w.lat, acc, level: null};
+    // At the airport and not choosing a start: the route starts where you are.
+    if (!userFrom && to && !(v && overV(v)) && acc <= 150) {
+      const lv = R ? R.from.l : P.data.defaultLevel;
+      let nn = null;
+      try { nn = N.airmap.nearest(P, [you.lon, you.lat], lv); } catch (e) { nn = null; }
+      if (nn && nn.dist_m <= 400) {
+        const p0 = {pt: [you.lon, you.lat], level: nn.level, label: 'Your location'};
+        let R1 = routeFor(P, p0, to, via, shut);
+        // Past check-in already (the route would leave the secure area to get back): skip it.
+        if (R1 && via.length && !(v && v.role === 'arrive') && arr(R1.steps).some(x => x.kind === 'exit')) { via = []; R1 = routeFor(P, p0, to, via, shut); }
+        // Landed with bags and still airside: the way out passes the carousels, so the route goes by them.
+        if (R1 && !via.length && !userTo && !s.via && v && v.role === 'arrive' && bags > 0 && hasPlace(P, 'baggage')
+          && arr(R1.steps).some(x => x.kind === 'exit')) {
+          const bg = bagRef(P, v.inn.arr.baggage), R2 = routeFor(P, p0, to, [bg], shut);
+          if (R2) { via = [bg]; R1 = R2; }
+        }
+        if (R1) { from = p0; R = R1; fromHere = true; you.level = nn.level; }
+      }
+    }
+  }
+  return {code, list, v, P, qG, bags, ex, d, from, to, via, R, you, k, fromHere, userFrom, userTo, shut};
+}
 
 // ---------- hero ----------
-function illo(code) {
-  const ill = {
-    PHX: '<circle cx="114" cy="34" r="13"/><path d="M48 46h44l-8 24H56z"/><path d="M60 70v74M80 70v74"/><path d="M70 46V22M60 22h20"/><path d="M14 144h112"/><path d="M60 98h20M60 120h20"/>',
-    CLT: (() => {
-      const c = [70, 84], ends = [[-150, 50], [-100, 56], [-40, 56], [10, 54], [62, 50]];
-      return `<circle cx="${c[0]}" cy="${c[1]}" r="15"/>` + ends.map(([deg, r]) => {
-        const a = deg * Math.PI / 180, x = (c[0] + Math.cos(a) * r).toFixed(1), y = (c[1] + Math.sin(a) * r).toFixed(1);
-        const x1 = (c[0] + Math.cos(a) * 15).toFixed(1), y1 = (c[1] + Math.sin(a) * 15).toFixed(1);
-        return `<path d="M${x1} ${y1}L${x} ${y}"/><circle cx="${x}" cy="${y}" r="6"/>`;
-      }).join('') + '<path d="M14 144h112"/>';
-    })(),
-    LGA: '<path d="M8 112Q70 34 132 112"/><path d="M8 100h124"/><path d="M38 100V78M70 100V64M102 100V78"/><path d="M14 126h30M56 134h34M100 126h28"/><path d="M84 30l14-4 10-12 3 2-6 12 12 2 3 4-15 1-9 8h-4l4-9z"/>',
-  }[code];
-  return ill ? raw(`<svg class="il ap-il" viewBox="0 0 140 150" aria-hidden="true"><g class="lk" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">${ill}</g></svg>`) : '';
-}
-function heroHtml(code, v, list, auto) {
-  const g = guide(code);
-  const term = v ? (v.role === 'depart' ? v.out.dep.terminal : v.inn.arr.terminal) : null;
+// Where you are going first: the gate (or the terminal and "Gate TBD"), the bags or the way out.
+function heroHtml(code, v, list, auto, m) {
+  const g = guide(code), P = m ? m.P : null, d = m ? m.d : {};
+  const term = !v ? null : v.role === 'connect' ? v.out.dep.terminal || v.inn.arr.terminal : v.role === 'depart' ? v.out.dep.terminal : v.inn.arr.terminal;
   const terms = arr(g && g.terminals).filter(obj);
   const tl = term ? termLabel(term) : terms.length === 1 ? str(terms[0].name) : '';
   // Time and zone never split across lines ("5:59a" / "MST").
@@ -215,7 +470,7 @@ function heroHtml(code, v, list, auto) {
   // Past tense only once the flight data says so; a passed time alone reads "due … · not confirmed yet".
   const said = (l, iso, done, verb, past, what) => l.canceled ? 'canceled' : done ? h`${past} ${tz(iso)}`
     : nowMs() >= T(iso) ? h`${l.state === 'past' ? 'was due' : 'due'} ${tz(iso)} · <span class="nw">${what} not confirmed yet</span>` : h`${verb}${verb ? ' ' : ''}${tz(iso)}`;
-  let l1 = '', l2 = '';
+  let l1 = '';
   if (v && v.role === 'depart') {
     const l = v.out;
     l1 = okT(l.dep.time) ? h`${flightNo(l)} to ${apCity(l.to)}, ${said(l, l.dep.time, leftOK(l), '', 'left', 'departure')}` : `${flightNo(l)} to ${apCity(l.to)}, time not confirmed`;
@@ -227,18 +482,87 @@ function heroHtml(code, v, list, auto) {
     const l = v.inn;
     l1 = okT(l.arr.time) ? h`${flightNo(l)} from ${apCity(l.from)}, ${said(l, l.arr.time, downOK(l), 'lands', 'landed', 'landing')}` : `${flightNo(l)} from ${apCity(l.from)}, time not confirmed`;
   } else l1 = 'Not on your trip';
-  l2 = v ? h`<span class="nw">${roleWord(v.role)} ${dayOf(v, code)}</span>` : '';
-  return h`<div class="ap-hero">
-    <div class="ps ap-ps" role="group" aria-label="Airport">${codes().map(c => h`<button type="button" data-act="ap" data-arg="${lc(c)}" aria-pressed="${c === code ? 'true' : 'false'}">${c}${c === auto ? h`<i class="ap-nd" aria-hidden="true"></i><span class="ap-vh">, now</span>` : ''}</button>`)}</div>
-    <div class="ap-top">
-      <div class="ey ap-ey">${apName(code)}${tl ? ` · ${tl}` : ''}</div>
-      <div class="dp ap-code" aria-label="${code}">${code}</div>
-      <p class="ap-sub"><b data-k="ap-h1-${code}-${v ? v.key : ''}">${l1}</b><span>${l2 ? h`${l2} · ` : ''}<span class="nw">${l2 ? 'it’s' : 'It’s'} <span class="tn" data-clock="${code}">${N.time(N.now(), code)}</span>${tzAbbr(code) ? ` ${tzAbbr(code)}` : ''} here</span></span></p>
+  const lg = v ? (v.role === 'arrive' ? v.inn : v.out) : null;
+  const boards = lg && v.role !== 'arrive' && !lg.canceled && !departed(lg) && okT(lg.dep.time) ? h`<span class="nw">Boards ${N.time(N.addMin(lg.dep.time, -N.AA.board), code)}</span>` : '';
+  // The day is on the visit switch under the hero when there is more than one visit.
+  const sub2 = [v && list.length < 2 ? h`<span class="nw">${roleWord(v.role)} ${dayOf(v, code)}</span>` : '', boards].filter(Boolean);
+  // Status of the flight that matters here: rose only when the model says it is bad.
+  const st = lg ? legSt(lg) : null;
+  const stT = st ? str(st.text).split(' · ').pop() : '';
+  // "Done" adds nothing to "was due …" or "left …" in the line below.
+  const chip = lg && stT && stT !== '—' && stT !== 'Done' ? h`<span class="chip ${st.tone === 'bad' ? 'rose' : 'ob'} ap-hs" data-k="ap-hs-${lg.id}">${stT}</span>` : '';
+
+  // The big line.
+  let lab = 'Airport', val = code, long = false, tbd = false, wantBags = false;
+  const gate = str(d.gate).toUpperCase();
+  if (v && v.role !== 'arrive') {
+    if (gate) { lab = v.role === 'connect' ? 'Next gate' : 'Your gate'; val = gate; }
+    else {
+      // "Terminal 4" shows 4; "Main Terminal" shows Main. With no terminal on the flight,
+      // an airport with one terminal still names it.
+      const t = str(term || tl).replace(/^terminal\s*/i, '').replace(/\s*terminal$/i, '').trim();
+      if (t && t.length <= 3) { lab = 'Terminal'; val = t.toUpperCase(); }
+      else if (t && t.length <= 14) { lab = 'Terminal'; val = t; long = t.length > 5; }
+      tbd = !v.out.canceled;
+    }
+  } else if (v) {
+    const bag = str(v.inn.arr.baggage);
+    wantBags = !!m && m.bags > 0 && !overV(v);
+    if (wantBags && bag) { lab = 'Carousel'; val = bag; long = bag.length > 4; }
+    else if (wantBags) { lab = 'Next'; val = 'Baggage claim'; long = true; }
+    else {
+      lab = m && m.ex.to === 'home' ? 'Way home' : 'Way out';
+      const kind = typeof d.to === 'string' && d.to.startsWith('place:') ? d.to.slice(6) : '';
+      const how = HOW.find(x => m && x[0] === m.ex.how);
+      val = kind && kind !== 'exit' ? KIND_LABEL[kind] : how ? how[1] : 'Exit';
+      long = true;
+    }
+  } else if (m && m.qG) { lab = 'Gate'; val = m.qG.toUpperCase(); }
+
+  // The line under it: where the gate is and how long the walk is.
+  const sameTo = m && epKey(m.to) === epKey(d.to);
+  const R = !m || !P ? null : sameTo && epKey(m.from) === epKey(d.from) || (sameTo && m.fromHere) ? m.R : routeFor(P, d.from, d.to, d.via, m.shut);
+  const here2 = !!(m && m.fromHere && R === m.R);
+  const walk = R && R.hops && R.hops.length ? `${R.mins} min${arr(R.steps).some(x => x.kind === 'security') ? ' with security' : ' walk'}${here2 ? ' from you' : ''}` : '';
+  const gm = [];
+  if (v && v.role !== 'arrive' || (!v && m && m.qG)) {
+    if (gate && d.off) gm.push(`Gate ${gate} isn’t on this map`);
+    else if (gate) {
+      const ref = typeof d.to === 'string' && d.to.startsWith('gate:') ? d.to.slice(5) : '';
+      const gx = P && ref ? P.gateByRef.get(ref) : null;
+      if (gx && gx.c) gm.push(/^[A-Z]$/i.test(str(gx.c)) ? `Concourse ${str(gx.c).toUpperCase()}` : `${gx.c} concourse`);
+      if (gx) gm.push(lvName(P, gx.l));
+      if (R && R.hops && !R.hops.length) gm.push('You’re at the gate');
+      else if (walk) gm.push(walk);
+    } else if (tbd) {
+      gm.push('Gate shows here once AA posts it');
+      if (walk && v.role === 'depart') gm.push(`${R.mins} min${here2 ? ' from you' : ''} to ${R.to && R.to.kind === 'checkpoint' && shortN(R.to.label) || 'security'}`);
+    }
+  } else if (v) {
+    // The time onward to the hotel or home is under the map, with the Hotel/Home and How choice.
+    // With bags to collect, the walk to the way out comes after them.
+    const out = shortN(R && R.to.label) || 'the way out';
+    if (R && R.hops && R.hops.length) {
+      gm.push(!wantBags ? `${R.mins} min walk to ${out}` : arr(R === m.R ? m.via : d.via).length ? `${R.mins} min walk via the bags to ${out}` : `Then a ${R.mins} min walk to ${out}`);
+    }
+  }
+  const art = (() => { try { return raw(N.airportIllo ? N.airportIllo(code) || '' : ''); } catch (e) { return ''; } })();
+  const showNow = !!m && (code !== auto || !!picked[code] || Object.keys(sel).some(x => x.startsWith(code + '|') && Object.keys(sel[x] || {}).length));
+  return h`<div class="${N.cls('ap-hero ap-h2', long && 'ap-hl')}">
+    <div class="ap-row">
+      <div class="ps ap-ps" role="group" aria-label="Airport">${codes().map(c => h`<button type="button" data-act="ap" data-arg="${lc(c)}" aria-pressed="${c === code ? 'true' : 'false'}">${c}${c === auto ? h`<i class="ap-nd" aria-hidden="true"></i><span class="ap-vh">, now</span>` : ''}</button>`)}</div>
+      ${showNow ? h`<button type="button" class="ap-now" data-act="now">${ic('current-location', 'clock')}<span>Now</span></button>` : ''}
     </div>
-    ${illo(code)}
+    <div class="ap-top">
+      <div class="ey ap-ey">${meta([apName(code), lab === 'Terminal' ? '' : tl])}</div>
+      <div class="ap-lab">${lab}</div>
+      <div class="${N.cls('dp ap-big', long && 'long')}" data-k="ap-big-${code}-${v ? v.key : ''}">${val}</div>
+      ${gm.length ? h`<p class="ap-gm" id="ap-gm">${meta(gm)}</p>` : ''}
+      <div class="ap-sub"><b data-k="ap-h1-${code}-${v ? v.key : ''}">${l1}</b><div class="ap-s2">${chip}<span>${sub2.map((x, i) => h`${i ? ' · ' : ''}${x}`)}${sub2.length ? ' · ' : ''}<span class="nw">${sub2.length ? 'it’s' : 'It’s'} <span class="tn" data-clock="${code}">${N.time(N.now(), code)}</span>${tzAbbr(code) ? ` ${tzAbbr(code)}` : ''} here</span></span></div></div>
+    </div>
+    ${art}
   </div>`;
 }
-
 // ---------- tiles ----------
 function tilesHtml(code, v) {
   const L = live(code), faa = obj(L.faa), tsa = obj(L.tsa) || {}, g = guide(code);
@@ -311,7 +635,7 @@ function callouts(code, v) {
   // Same model and words as Flights and Today: spare = reaching the gate to its doors closing.
   let c = null;
   if (v && v.role === 'connect') { try { c = N.connection(v.dir); } catch (e) { c = null; } }
-  if (c && c.level !== 'ok' && !v.inn.canceled && !v.out.canceled && !overV(v)) {
+  if (c && c.level !== 'ok' && !v.inn.canceled && !v.out.canceled && !overV(v) && okT(v.inn.arr.time) && okT(v.out.dep.time)) {
     const gt = v.out.dep.gate ? `gate ${v.out.dep.gate}` : 'the next gate';
     const doors = N.time(N.addMin(v.out.dep.time, -N.AA.doors), code), reach = N.time(N.addMin(v.inn.arr.time, 10 + c.walk.min), code);
     co(c.level === 'risk' ? 'rose' : 'ap-warn', 'hourglass', `${c.label} connection.`, c.spare > 0
@@ -336,8 +660,8 @@ function callouts(code, v) {
     .replace(/^\s*(?:about\s+)?\d+\s*(?:min(?:ute)?s?|h(?:ours?)?)\s+connection\s*[,;:.]\s*/i, '').replace(/^[a-z]/, x => x.toUpperCase());
   const ss = sentences(summ).map(x => x.trim());
   if (ss.length && !(ss.length === 1 && /^terminal\s+\w+\.?$/i.test(ss[0]))) co('', 'info-circle', ss[0], ss.slice(1).join(' '));
-  if (v && v.role !== 'arrive' && !v.out.canceled && !overV(v) && !gate) co('plain', 'map-pin', 'Gate not posted.', guess ? `${guess.trim()} The actual gate shows here and on the map once AA posts it.`
-    : `The ${flightNo(v.out)} gate shows here and on the map once AA posts it.`);
+  // The hero and the route already say the gate isn't posted; this adds the guide's guess, when it has one.
+  if (guess && v && v.role !== 'arrive' && !v.out.canceled && !overV(v) && !gate) co('plain', 'map-pin', 'Gate not posted.', `${guess.trim()} The actual gate shows here and on the map once AA posts it.`);
   return out;
 }
 // Guide caveats, minus the ones the data has already answered.
@@ -397,12 +721,15 @@ function transitPick(kind) {
 }
 const minsTxt = m => Array.isArray(m) ? (m[0] === m[1] ? `${m[0]} min` : `${m[0]}–${m[1]} min`)
   : Number.isFinite(+m) && m !== '' && m != null ? `${+m} min` : /^\d+(–\d+)? min$/.test(str(m)) ? str(m) : '';
-function stepsHtml(code, v) {
+function stepsHtml(code, v, m) {
   const g = guide(code);
   const title = !v ? 'Steps' : v.role === 'depart' ? `Leaving from ${code}` : v.role === 'connect' ? `Connecting at ${code}` : `Arriving at ${code}`;
   const head = h`<div class="ey">${title}</div>`;
   if (!v) return h`<section class="sec ap-anc" id="ap-steps">${head}<div class="co plain">${icon('info-circle')}<span><b>Not on your trip.</b> ${code} has no timed steps.</span></div></section>`;
-  let steps = arr(obj(g && g.steps) ? g.steps[v.role] : null).filter(obj);
+  // A list written for this direction (connect_out / connect_ret) wins over the shared one.
+  const gs = obj(g && g.steps) ? g.steps : {};
+  const own = arr(gs[`${v.role}_${v.dir}`]).filter(obj);
+  let steps = own.length ? own : arr(gs[v.role]).filter(obj);
   if (!steps.length) {
     const msg = v.role === 'arrive' ? 'Ground options are below.' : `The guide has no ${v.role === 'connect' ? 'connection' : 'departure'} steps for ${code} yet.`;
     return h`<section class="sec ap-anc" id="ap-steps">${head}<div class="co plain">${icon('info-circle')}<span><b>No steps saved.</b> ${msg}</span></div></section>`;
@@ -411,7 +738,7 @@ function stepsHtml(code, v) {
   // visit's flight numbers and drop details that quote the other day's times.
   const other = visitsOf(code).find(x => x.role === v.role && x.dir !== v.dir);
   const swap = [];
-  if (other && v.dir === 'ret') {
+  if (other && v.dir === 'ret' && !own.length) {
     if (other.inn && v.inn && flightNo(other.inn) !== flightNo(v.inn)) swap.push([flightNo(other.inn), flightNo(v.inn)]);
     if (other.out && v.out && flightNo(other.out) !== flightNo(v.out)) swap.push([flightNo(other.out), flightNo(v.out)]);
   }
@@ -433,6 +760,8 @@ function stepsHtml(code, v) {
   const walkMin = wk ? wk.min : c && c.walk ? c.walk.min : 15;
   const offAt = arrT ? N.addMin(arrT, 10) : null, reachAt = arrT ? N.addMin(arrT, 10 + walkMin) : null;
   const gateStep = s => v.role === 'connect' && (s.icon === 'device-mobile' || /\bfind\b.*\bgate\b/i.test(str(s.title)));
+  // The checkpoint the route goes through (the map may pick another for your gate or the hour).
+  const rcp = v.role === 'depart' && m && m.R ? str((arr(m.R.steps).find(x => x.kind === 'security') || {}).cp) : '';
   const walkStep = s => v.role === 'connect' && s.icon === 'route' && /\bwalk\b/i.test(str(s.title));
   const rows = steps.map(s => {
     const rel = obj(s.rel);
@@ -454,6 +783,11 @@ function stepsHtml(code, v) {
     if (walkStep(s) && wk && wk.known) return null;
     const extra = [];
     let t = sub(s.title) || 'Step', detail = reused && hasClock(s.detail) ? '' : sub(s.detail), link = '', hideMin = false;
+    if (rcp && s.icon === 'shield-check' && /\bcheckpoint\s+\w+/i.test(t) && !lc(t).includes(lc(rcp))) {
+      const ck = arr(g && g.security).filter(obj).find(x => lc(shortN(x.name)) === lc(rcp));
+      t = `Security at ${rcp}`;
+      detail = ck ? `${[str(ck.where), str(ck.hours) && `open ${apTime(ck.hours)}`].filter(Boolean).join(', ')}.` : '';
+    }
     if (s.icon === 'car' && v.role === 'depart' && rel) {
       let lv = null; try { lv = N.leave(v.dir); } catch (e) { lv = null; }
       if (lv && okT(lv.at)) {
@@ -470,7 +804,7 @@ function stepsHtml(code, v) {
       t = `Gate ${gOut}${gIn ? ` · from ${gIn}` : ''}${wk && wk.known ? ` · ~${wk.min} min` : ''}`;
       detail = '';
       if (wk && wk.known) hideMin = true;
-      if (obj(g && g.nav)) link = `#nav/${lc(code)}/@arr/@dep`;
+      if (Ps[code] !== null) link = 'conn';
     }
     // When you reach the gate against its doors, rated like the connection (amber tight, rose at risk).
     if (gateStep(s) && gOut && c && reachAt && okT(v.out.dep.time)) {
@@ -531,735 +865,13 @@ function stepsHtml(code, v) {
         ${r.detail ? h`<small>${r.detail}</small>` : ''}
         ${r.extra.map(x => h`<small class="${N.cls('ap-x', x.cls)}">${x.t || x}</small>`)}
         ${r.min && !r.hideMin ? h`<small class="ap-mn">${icon('clock')}About ${N.dur(r.min)}</small>` : ''}
-        ${r.link ? h`<a class="ap-tb ap-wk ap-sl" href="${r.link}">${ic('walk', 'route')}<span>Walk me there</span></a>` : ''}</div>
+        ${r.link ? h`<button type="button" class="ap-tb ap-wk ap-sl" data-act="tomap" data-arg="conn">${ic('walk', 'route')}<span>Show on map</span></button>` : ''}</div>
     </li>`;
   });
   const notes = [];
   if (reused) notes.push(h`<p class="ap-note">These steps were written for the outbound connection. Times use your ${v.dir === 'ret' ? 'return' : ''} flights.</p>`);
   if (!okT(v.at)) notes.push(h`<p class="ap-note">Times show once ${flightNo(v.leg)} is confirmed.</p>`);
   return h`<section class="sec ap-anc" id="ap-steps">${head}${notes}<ol class="ap-steps">${html}</ol></section>`;
-}
-
-// ---------- terminal map ----------
-const normG = g => str(g).toUpperCase().replace(/\bGATE\b/g, '').replace(/\s+/g, '').replace(/^([A-Z]*)0+(\d)/, '$1$2');
-const num = v => { const n = +v; return Number.isFinite(n) ? n : NaN; };
-const ENT = {amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' '};
-const unent = s => str(s).replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (m0, d, x, n) => {
-  const c = d ? +d : x ? parseInt(x, 16) : NaN;
-  if (Number.isFinite(c)) return c > 0 && c < 0x110000 ? String.fromCodePoint(c) : '';
-  return ENT[lc(n)] != null ? ENT[lc(n)] : m0;
-});
-const attr = (a, k) => { const m = str(a).match(new RegExp(`(?:^|\\s)${k}="([^"]*)"`)); return m ? m[1] : ''; };
-// The guide's SVG carries its own text, legend, "you" dot and gate circles. Text is
-// lifted out and drawn as HTML pins (sharp, ≥12px at every zoom), the legend is
-// dropped (the page has its own key), and gate circles become findable gates.
-const preps = {};
-function prepSvg(code, svg) {
-  const c = preps[code];
-  if (c && c.src === svg) return c;
-  const texts = [];
-  for (const m of svg.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/g)) {
-    const a = m[1], t = unent(m[2].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
-    const x = num(attr(a, 'x')), y = num(attr(a, 'y'));
-    if (!t || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const an = attr(a, 'text-anchor');
-    texts.push({cls: attr(a, 'class'), x, y, fs: num(attr(a, 'font-size')) || 10, fw: num(attr(a, 'font-weight')) || 400,
-      al: an === 'middle' ? 'm' : an === 'end' ? 'e' : 's', t});
-  }
-  const LEG = /^(gates?|food|security|you|your gate|route|walk(ing route)?)$/i;
-  const leg = texts.filter(t => LEG.test(t.t));
-  let box = null;
-  if (leg.length >= 3) {
-    const xs = leg.map(t => t.x), ys = leg.map(t => t.y);
-    if (Math.max(...xs) - Math.min(...xs) < 12 && Math.max(...ys) - Math.min(...ys) < 120) box = [Math.min(...xs) - 18, Math.min(...ys) - 12, Math.max(...xs) + 2, Math.max(...ys) + 4];
-  }
-  const inBox = (x0, y0, x1, y1) => box && x0 >= box[0] && y0 >= box[1] && x1 <= box[2] && y1 <= box[3];
-  let out = svg.replace(/<text\b[^>]*>[\s\S]*?<\/text>/g, '');
-  out = out.replace(/<(circle|rect|line)\b([^>]*?)(?:\/>|>\s*<\/\1>)/g, (m0, tag, a) => {
-    if (/(?:^|\s)id="you"/.test(a)) return '';
-    if (!box || attr(a, 'data-g')) return m0;
-    const n = k => num(attr(a, k));
-    if (tag === 'circle') { const r = n('r') || 0; return r <= 5 && inBox(n('cx') - r, n('cy') - r, n('cx') + r, n('cy') + r) ? '' : m0; }
-    if (tag === 'rect') return n('width') <= 12 && n('height') <= 12 && inBox(n('x'), n('y'), n('x') + n('width'), n('y') + n('height')) ? '' : m0;
-    return inBox(Math.min(n('x1'), n('x2')), Math.min(n('y1'), n('y2')), Math.max(n('x1'), n('x2')), Math.max(n('y1'), n('y2'))) ? '' : m0;
-  });
-  // Open wall paths are corridor centre lines (older maps); closed ones are floor.
-  out = out.replace(/<path\b([^>]*\bclass="[^"]*\bm-wall\b[^"]*")([^>]*)>/g, (m0, a, b) => /\sd="[^"]*[Zz]/.test(m0) || !/\sd="/.test(m0) ? m0 : `<path${a.replace(/m-wall/, 'm-wall ap-open')}${b}>`);
-  const keep = texts.filter(t => !(box && LEG.test(t.t)) && !/^↑/.test(t.t));
-  const gtexts = keep.filter(t => /\bm-gate\b/.test(t.cls));
-  const gates = [];
-  for (const m of svg.matchAll(/<circle\b([^>]*)>/g)) {
-    const g = attr(m[1], 'data-g');
-    const x = num(attr(m[1], 'cx')), y = num(attr(m[1], 'cy'));
-    if (!g || !Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const id = normG(g), n = (id.match(/\d+[A-Z]?$/) || [''])[0];
-    // The gate's own number label, drawn beside the concourse: the bubble goes there.
-    let lab = null, bd = 18;
-    for (const t of gtexts) { const tn = normG(t.t); if (tn !== id && tn !== n) continue; const d = Math.hypot(t.x - x, t.y - t.fs * 0.35 - y); if (d < bd) { bd = d; lab = t; } }
-    gates.push({g: id, x, y, lx: lab ? lab.x : x, ly: lab ? lab.y - lab.fs * 0.35 : y, al: lab ? lab.al : 'm'});
-  }
-  const lbls = keep.filter(t => !/\bm-gate\b/.test(t.cls)).map(t => ({t: t.t, x: t.x, y: t.y - t.fs * 0.35, al: t.al, big: t.fs >= 10, bold: t.fw >= 600, w: t.t.length * t.fs * 0.55}));
-  return (preps[code] = {src: svg, svg: out, gates, lbls});
-}
-// Short names for pins; the full guide text shows when you tap.
-const LOC = /^(?:level|l\d|terminal|doors?|food (?:hall|court)|upper|lower|airside|landside|before|after|past|near|by|inside|outside|outer|inner|carousels?|concourse|garage|curb|just|west|east|north|south|cent(?:re|er))\b/i;
-function shortLabel(s) {
-  const full = str(s).trim();
-  const parts = full.split(': ')[0].split(' (')[0].split(', ');
-  let out = parts[0];
-  for (let i = 1; i < parts.length && !LOC.test(parts[i]); i++) out += ', ' + parts[i];
-  out = out.replace(/^American customer service desk/i, 'AA service desk').replace(/^American check-in/i, 'AA check-in').trim();
-  out = out.replace(/^(.{4,}?)\s+(near|between|by|beside|next to|across from|opposite)\s+[A-Z0-9].*$/, '$1');
-  if (out.length > 30 && /shuttle/i.test(out)) out = 'Shuttles';
-  return out || full;
-}
-function kindOf(id, p) {
-  const k = lc(p.kind) || 'poi', L = lc(p.label);
-  if (id === 'hub' || k === 'hub') return 'hub';
-  if (k === 'bag' || k === 'claim') return 'baggage';
-  if (k === 'ride' || k === 'rideshare' || k === 'uber') return 'rideshare';
-  if (k === 'info' || k === 'poi') {
-    if (/admirals club|lounge|provisions|\bclub\b/.test(L)) return 'lounge';
-    if (/check-in|ticketing/.test(L)) return 'checkin';
-  }
-  return k;
-}
-function mapPoints(map) {
-  const P = obj(map.points) || {};
-  return Object.keys(P).map(id => {
-    const p = obj(P[id]);
-    if (!p || lc(p.kind) === 'line' || !Number.isFinite(num(p.x)) || !Number.isFinite(num(p.y))) return null;
-    const full = str(p.label) || id, kind = kindOf(id, p);
-    return {id, x: num(p.x), y: num(p.y), full, label: kind === 'gate' ? full : shortLabel(full), kind};
-  }).filter(Boolean);
-}
-// Concourse lines: gates spread evenly from x1,y1 (first gate) to x2,y2 (last); `via` is the
-// walk from the airside hub to the line.
-function mapLines(map) {
-  const P = obj(map.points) || {};
-  const pt = q => Array.isArray(q) && Number.isFinite(num(q[0])) && Number.isFinite(num(q[1])) ? [num(q[0]), num(q[1])] : null;
-  return Object.keys(P).map(id => {
-    const p = obj(P[id]);
-    if (!p || lc(p.kind) !== 'line') return null;
-    const l = {id, x1: num(p.x1), y1: num(p.y1), x2: num(p.x2), y2: num(p.y2), from: num(p.from), to: num(p.to),
-      prefix: normG(p.prefix), for: lc(p.for) || 'gate', via: arr(p.via).map(pt).filter(Boolean), label: str(p.label)};
-    return [l.x1, l.y1, l.x2, l.y2].every(Number.isFinite) ? l : null;
-  }).filter(Boolean);
-}
-const onLine = (l, n) => Number.isFinite(l.from) && Number.isFinite(l.to) && n >= Math.min(l.from, l.to) && n <= Math.max(l.from, l.to);
-const lineAt = (l, n) => { const t = l.to === l.from ? 0.5 : (n - l.from) / (l.to - l.from); return [l.x1 + (l.x2 - l.x1) * t, l.y1 + (l.y2 - l.y1) * t]; };
-function proj(l, p) {
-  const dx = l.x2 - l.x1, dy = l.y2 - l.y1, L = dx * dx + dy * dy || 1;
-  const t = N.clamp(((p.x - l.x1) * dx + (p.y - l.y1) * dy) / L, 0, 1);
-  return [l.x1 + dx * t, l.y1 + dy * t];
-}
-function lineFor(lines, want, p) {
-  const m = want.match(/^([A-Z]*)(\d+)/);
-  const gl = lines.filter(l => l.for === 'gate');
-  const hit = m && gl.find(l => l.prefix === m[1] && onLine(l, +m[2]));
-  if (hit) return hit;
-  let best = null, bd = 24;
-  for (const l of gl) { const q = proj(l, p), d = Math.hypot(q[0] - p.x, q[1] - p.y); if (d < bd) { bd = d; best = l; } }
-  return best;
-}
-function findGate(pts, lines, gate) {
-  if (!gate) return null;
-  const w0 = normG(gate);
-  if (!w0) return null;
-  // "B22" at an airport whose gates are plain numbers is gate 22.
-  const wants = [...new Set([w0, w0.replace(/^[A-Z]+(?=\d)/, '')])];
-  const gates = pts.filter(p => p.kind === 'gate');
-  for (const want of wants) {
-    const hit = gates.find(p => normG(str(p.id).replace(/^gate-/i, '')) === want || normG(p.label) === want) || pts.find(p => normG(p.id) === want);
-    if (hit) return Object.assign({}, hit, {exact: true, line: lineFor(lines, want, hit)});
-  }
-  // Not drawn: place it on its concourse line by number.
-  for (const want of wants) {
-    const m = want.match(/^([A-Z]*)(\d+)/);
-    const l = m && lines.find(q => q.for === 'gate' && q.prefix === m[1] && onLine(q, +m[2]));
-    if (l) { const [x, y] = lineAt(l, +m[2]); return {id: 'gate-' + want, label: want, full: want, kind: 'gate', x, y, exact: true, est: true, line: l}; }
-  }
-  const m = w0.match(/^([A-Z]*)(\d+)/);
-  if (!m) return null;
-  let best = null, bd = 1e9;
-  for (const p of gates) {
-    const q = normG(p.label || p.id).match(/^([A-Z]*)(\d+)/);
-    if (!q || q[1] !== m[1]) continue;
-    const d = Math.abs(+q[2] - +m[2]);
-    if (d < bd) { bd = d; best = p; }
-  }
-  return best && bd <= 6 ? Object.assign({}, best, {exact: false, line: lineFor(lines, normG(best.label), best)}) : null;
-}
-// Polyline helpers. Points are [x, y].
-const same = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.6;
-const pathTo = (l, p) => [...l.via, proj(l, p), [p.x, p.y]];   // from the hub to p
-function tidy(r) {
-  if (!r) return null;
-  let a = r.filter(p => p && Number.isFinite(p[0]) && Number.isFinite(p[1]));
-  for (let again = true; again;) {
-    again = false;
-    a = a.filter((p, i) => i === 0 || !same(p, a[i - 1]));
-    for (let i = 1; i + 1 < a.length; i++) {
-      const [p, q, s] = [a[i - 1], a[i], a[i + 1]];
-      const ux = q[0] - p[0], uy = q[1] - p[1], vx = s[0] - q[0], vy = s[1] - q[1];
-      // A middle point on a straight run, or the tip of a there-and-back, adds nothing.
-      if (Math.abs(ux * vy - uy * vx) <= 0.01 * Math.hypot(ux, uy) * Math.hypot(vx, vy)) { a.splice(i, 1); again = true; break; }
-    }
-  }
-  return a.length > 1 ? a : null;
-}
-function between(a, b) {
-  const la = a.line, lb = b.line;
-  if (!la || !lb) return null;
-  if (la === lb) return [[a.x, a.y], proj(la, a), proj(la, b), [b.x, b.y]];
-  const A = [...la.via, proj(la, a)], B = [...lb.via, proj(lb, b)];
-  let c = 0;
-  while (c < A.length && c < B.length && same(A[c], B[c])) c++;
-  return [[a.x, a.y], ...A.slice(Math.max(0, c - 1)).reverse(), ...B.slice(c), [b.x, b.y]];
-}
-const segDist = (p, a, b) => {
-  const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy || 1;
-  const t = N.clamp(((p.x - a[0]) * dx + (p.y - a[1]) * dy) / L, 0, 1);
-  return Math.hypot(a[0] + dx * t - p.x, a[1] + dy * t - p.y);
-};
-const nearPath = (p, r) => r && r.length > 1 ? Math.min(...r.slice(1).map((q, i) => segDist(p, r[i], q))) : Infinity;
-// A route the map's author drew (an M/L path with an id), as points.
-function bakedRoute(svg, id) {
-  const m = str(svg).match(new RegExp(`<path\\b[^>]*\\bid="${id}"[^>]*>`));
-  const d = m && attr(m[0], 'd');
-  if (!d || /[^MLml\d\s,.\-e]/.test(d)) return null;
-  const out = [];
-  let cur = [0, 0];
-  for (const c of d.match(/[MLml][^MLml]*/g) || []) {
-    const n = (c.slice(1).match(/-?\d*\.?\d+(?:e-?\d+)?/gi) || []).map(Number);
-    for (let i = 0; i + 1 < n.length; i += 2) { cur = c[0] === c[0].toLowerCase() ? [cur[0] + n[i], cur[1] + n[i + 1]] : [n[i], n[i + 1]]; out.push(cur); }
-  }
-  return out.length > 1 ? out : null;
-}
-// Corridor graph from open .m-wall centre lines (older maps without concourse lines).
-const graphs = {};
-function wallGraph(code, svg) {
-  if (graphs[code] && graphs[code].svg === svg) return graphs[code].g;
-  const nodes = new Map();
-  const node = (x, y) => { const k = `${Math.round(x * 10)},${Math.round(y * 10)}`; let n = nodes.get(k); if (!n) { n = {x, y, adj: []}; nodes.set(k, n); } return n; };
-  const ds = new Set();
-  for (const m of str(svg).matchAll(/<path\b[^>]*\bclass="[^"]*\bm-wall\b[^"]*"[^>]*>/g)) { const d = attr(m[0], 'd'); if (d && !/[Zz]/.test(d)) ds.add(d); }
-  for (const d of ds) {
-    let prev = null;
-    for (const c of d.match(/[MLml][^MLml]*/g) || []) {
-      const nums = (c.slice(1).match(/-?\d*\.?\d+(?:e-?\d+)?/gi) || []).map(Number);
-      for (let i = 0; i + 1 < nums.length; i += 2) {
-        const n = node(nums[i], nums[i + 1]);
-        if (!(c[0] === 'M' && i === 0) && prev && prev !== n) {
-          const w = Math.hypot(prev.x - n.x, prev.y - n.y);
-          prev.adj.push([n, w]); n.adj.push([prev, w]);
-        }
-        prev = n;
-      }
-    }
-  }
-  const g = [...nodes.values()];
-  graphs[code] = {svg, g};
-  return g;
-}
-function routeThrough(g, a, b) {
-  if (!a || !b) return null;
-  const straight = [[a.x, a.y], [b.x, b.y]];
-  if (!g.length) return straight;
-  const near = p => { let best = null, bd = Infinity; for (const n of g) { const d = Math.hypot(n.x - p.x, n.y - p.y); if (d < bd) { bd = d; best = n; } } return best; };
-  const s = near(a), t = near(b);
-  if (!s || !t) return straight;
-  const dist = new Map([[s, 0]]), prev = new Map(), done = new Set();
-  for (;;) {
-    let u = null, du = Infinity;
-    for (const [n, d] of dist) if (!done.has(n) && d < du) { du = d; u = n; }
-    if (!u || u === t) break;
-    done.add(u);
-    for (const [n, w] of u.adj) { const nd = du + w; if (nd < (dist.has(n) ? dist.get(n) : Infinity)) { dist.set(n, nd); prev.set(n, u); } }
-  }
-  if (!dist.has(t)) return straight;
-  const path = [t]; let c = t;
-  while (prev.has(c)) { c = prev.get(c); path.unshift(c); }
-  const out = [[a.x, a.y]];
-  for (const n of path) { const l = out[out.length - 1]; if (Math.hypot(l[0] - n.x, l[1] - n.y) > 0.5) out.push([n.x, n.y]); }
-  const l = out[out.length - 1];
-  if (Math.hypot(l[0] - b.x, l[1] - b.y) > 0.5) out.push([b.x, b.y]);
-  return out.length > 1 ? out : straight;
-}
-const KIND_IC = {security: 'shield-check', baggage: 'luggage', taxi: 'car', rideshare: 'car-suv', bus: 'bus', train: 'train', lounge: 'armchair-2',
-  food: 'tools-kitchen-2', restroom: 'toilet-paper', parking: 'parking', info: 'info-circle', elevator: 'elevator', stairs: 'stairs', checkin: 'ticket', exit: 'door-exit'};
-// Which guide checkpoint the map should use: the first one in the guide that is open
-// when you go through and that the map shows.
-function pickSecurity(code, v, secs) {
-  if (!secs.length) return null;
-  const at = secTime(code, v), m = at ? localMin(at, code) : null;
-  for (const s of arr(guide(code) && guide(code).security).filter(obj)) {
-    const name = lc(s.name).replace(/\s*\(.*?\)\s*/g, ' ').trim();
-    if (!name) continue;
-    const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-    const p = secs.find(q => re.test(lc(q.label)) || re.test(lc(q.full)));
-    if (p && openAt(hoursRange(s.hours), m) !== false) return p;
-  }
-  return secs.length === 1 ? secs[0] : null;
-}
-// Map notes for this visit: no notes about how the map was drawn, and none for
-// the other direction ("Coming home: …" on a departure).
-function mapNotes(list, v) {
-  const role = v ? v.role : '';
-  const away = role === 'depart' ? /^(Coming home|Arriving)\b/i : role === 'arrive' ? /^(Leaving|Departing)\b/i
-    : role === 'connect' ? /^(Coming home|Arriving|Leaving|Departing)\b/i : null;
-  return arr(list).map(str).filter(n => n && !(away && away.test(n)))
-    .map(n => n.replace(/\.\s+(?=[A-Z])/g, '.\n').split('\n').filter(s => !/official data|drawn at|third-party/i.test(s)).join(' '))
-    .filter(Boolean);
-}
-// Everything the map needs for one airport and visit; kept for mount().
-const models = {};
-function mapModel(code, v) {
-  const g = guide(code), map = obj(g && g.map);
-  if (!map || !str(map.svg)) return null;
-  const vb = (Array.isArray(map.viewBox) ? map.viewBox : str(map.viewBox).trim().split(/[\s,]+/)).map(Number);
-  if (vb.length !== 4 || vb.some(x => !Number.isFinite(x)) || vb[2] <= 0 || vb[3] <= 0) return null;
-  const prep = prepSvg(code, str(map.svg));
-  const lines = mapLines(map);
-  const pts = mapPoints(map);
-  prep.gates.forEach(q => { if (!pts.some(p => p.kind === 'gate' && normG(p.label) === q.g)) pts.push({id: 'gate-' + q.g, x: q.x, y: q.y, label: q.g, full: q.g, kind: 'gate'}); });
-  const graph = lines.length ? [] : wallGraph(code, map.svg);
-  const hub = pts.find(p => p.kind === 'hub');
-  const you = [], used = new Set();
-  let route = null, gateLabel = '', gateMissing = false, baked = null;
-  const pin = (p, label, tone) => { if (p) { you.push({x: p.x, y: p.y, label, tone, id: p.id}); used.add(p.id); } };
-  const gname = (p, raw2) => p.exact ? str(raw2).toUpperCase() : `Near ${str(raw2).toUpperCase()}`;
-  const fromHub = p => p.line ? pathTo(p.line, p) : hub ? routeThrough(graph, hub, p) : null;
-  if (v && v.role === 'depart') {
-    const gp = findGate(pts, lines, v.out.dep.gate);
-    const secs = pts.filter(p => p.kind === 'security');
-    const pre = bakedRoute(map.svg, 'route-depart');
-    const sec = pickSecurity(code, v, secs) || (gp ? secs.slice().sort((a, b) => Math.hypot(a.x - gp.x, a.y - gp.y) - Math.hypot(b.x - gp.x, b.y - gp.y))[0] : null);
-    if (sec) pin(sec, /secur|checkpoint|tsa/i.test(str(sec.label)) ? str(sec.label) : `${sec.label} · Security`, 'via');
-    if (gp) {
-      pin(gp, `${gname(gp, v.out.dep.gate)} · Your gate`, 'you');
-      gateLabel = `Gate ${str(v.out.dep.gate).toUpperCase()}`;
-      const tail = gp.line ? pathTo(gp.line, gp) : null;
-      if (tail && pre && sec && nearPath(sec, pre) < 8 && same(pre[pre.length - 1], tail[0])) route = tidy([...pre, ...tail]);
-      else if (tail && sec) route = tidy([[sec.x, sec.y], [sec.x, tail[0][1]], ...tail]);
-      else route = tidy(tail || (sec ? routeThrough(graph, sec, gp) : null));
-    } else {
-      gateMissing = !v.out.dep.gate;
-      if (pre && (!sec || nearPath(sec, pre) < 8)) baked = pre;
-    }
-  } else if (v && v.role === 'connect') {
-    const a = findGate(pts, lines, v.inn.arr.gate), b = findGate(pts, lines, v.out.dep.gate);
-    if (a) pin(a, `${gname(a, v.inn.arr.gate)} · You land`, 'via');
-    if (b) pin(b, `${gname(b, v.out.dep.gate)} · Next flight`, 'you');
-    if (a && b) route = tidy(between(a, b) || routeThrough(graph, a, b));
-    else if (b) route = tidy(fromHub(b));
-    else if (a) { const r = fromHub(a); route = tidy(r && r.slice().reverse()); }
-    gateLabel = b ? `Gate ${str(v.out.dep.gate).toUpperCase()}` : a ? `Gate ${str(v.inn.arr.gate).toUpperCase()}` : '';
-    gateMissing = !b && !v.out.dep.gate;
-  } else if (v && v.role === 'arrive') {
-    const a = findGate(pts, lines, v.inn.arr.gate);
-    const bag = str(v.inn.arr.baggage).trim();
-    const claimL = lines.find(l => l.for === 'baggage');
-    const bagPt = pts.find(p => p.kind === 'baggage');
-    let c = null;
-    if (bag && claimL && /^\d+$/.test(bag) && onLine(claimL, +bag)) { const [x, y] = lineAt(claimL, +bag); c = {id: 'claim-' + bag, x, y, label: `Carousel ${bag}`}; }
-    else if (bag) c = pts.find(p => p.kind === 'baggage' && (normG(p.label).replace(/^(CLAIM|CAROUSEL)/, '') === normG(bag) || lc(p.id) === `claim-${lc(bag)}`)) || null;
-    const to = c || bagPt;
-    if (a) {
-      pin(a, `${gname(a, v.inn.arr.gate)} · You land`, 'you');
-      gateLabel = `Gate ${str(v.inn.arr.gate).toUpperCase()}`;
-      const r = a.line ? pathTo(a.line, a).reverse() : null;
-      if (r && to) route = tidy(claimL ? [...r, ...claimL.via, proj(claimL, to), [to.x, to.y]] : [...r, [to.x, to.y]]);
-      else if (r) route = tidy(r);
-      else if (to) route = tidy(routeThrough(graph, a, to));
-    } else {
-      gateMissing = !v.inn.arr.gate;
-      baked = bakedRoute(map.svg, 'route-arrive');
-    }
-    if (c) pin(c, `${c.label} · Your bags`, 'via');
-  }
-  // Other places worth a bubble, most useful first. The hub is a routing point, not a place.
-  const PRI = {security: 2, baggage: 2, taxi: 2, rideshare: 2, bus: 2, train: 2, exit: 2, checkin: 2, lounge: 3, info: 3, restroom: 4, food: 4};
-  const poi = pts.filter(p => p.kind !== 'gate' && p.kind !== 'hub' && !used.has(p.id) && KIND_IC[p.kind]).map(p => ({x: p.x, y: p.y, label: p.label, kind: p.kind,
-    pri: PRI[p.kind] || 3, minS: (PRI[p.kind] || 3) >= 4 ? 1.7 : 1, labelS: (PRI[p.kind] || 3) >= 4 ? 3 : 2.2}))
-    .sort((a, b) => a.pri - b.pri);
-  // Map words (concourse names, levels, carousel numbers). Skip ones a place bubble already names.
-  const lbls = prep.lbls.filter(t => {
-    if (/^\d+$/.test(t.t)) return true;
-    const cx = t.al === 's' ? t.x + t.w / 2 : t.al === 'e' ? t.x - t.w / 2 : t.x;
-    return !pts.some(p => p.kind !== 'gate' && p.kind !== 'hub' && KIND_IC[p.kind] && Math.hypot(p.x - cx, p.y - t.y) < 14);
-  }).map(t => ({x: t.x, y: t.y, label: t.t, al: t.al, pri: t.big ? 1 : t.bold ? 2.5 : 3, minS: t.big || t.bold ? 1 : 1.4, cls: t.big ? 'big' : t.bold ? 'bd' : ''}));
-  const youIds = new Set(you.map(p => normG(str(p.id).replace(/^gate-/i, ''))));
-  const gates = prep.gates.length
-    ? prep.gates.filter(q => !youIds.has(q.g)).map(q => ({x: q.lx, y: q.ly, label: q.g, al: q.al}))
-    : pts.filter(p => p.kind === 'gate' && !used.has(p.id)).map(p => ({x: p.x, y: p.y, label: p.label, al: 'm'}));
-  let focus = null;
-  const fp = [...(route || baked || []), ...you.map(p => [p.x, p.y])];
-  if (fp.length) {
-    const xs = fp.map(p => p[0]), ys = fp.map(p => p[1]);
-    focus = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-  }
-  const m = {code, vb, svg: prep.svg, you, poi, lbls, gates, route, baked: !!baked, focus, gateLabel, gateMissing, pts, lines,
-    role: v ? v.role : '', notes: mapNotes(map.notes, v), source: map.source};
-  models[code] = m;
-  return m;
-}
-const CAP1 = 'Pinch or double-tap to zoom', CAP2 = 'Drag to move · Done to scroll the page';
-function mapHtml(code, v, gq) {
-  const g = guide(code);
-  const offMap = arr(g && g.links).filter(obj).find(l => /map/i.test(str(l.label)) && /^https?:/i.test(str(l.url)));
-  const offLink = offMap ? ext(offMap.url, h`${icon('map')}<span>${str(offMap.label) || 'Official map'}</span>${icon('arrow-up-right')}`, 'chip cr ap-c44') : '';
-  const m = mapModel(code, v);
-  if (!m) {
-    models[code] = null;
-    return h`<section class="sec ap-anc" id="ap-map"><div class="ey">Terminal map</div>
-      <div class="ap-nomap">${icon('map-2')}<div><b>No terminal map saved for ${code} yet</b><small>The airport’s own map works when you have signal.</small></div></div>
-      ${offLink ? h`<div class="wrap ap-ml">${offLink}</div>` : ''}</section>`;
-  }
-  const [x, y, w, hh] = m.vb;
-  const d = m.route ? 'M' + m.route.map(p => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('L') : '';
-  const src = typeof m.source === 'string' ? m.source : obj(m.source) ? str(m.source.name || m.source.text) : '';
-  const both = v && v.role === 'connect' && m.you.length > 1;
-  const sub = both ? h`Gates ${str(v.inn.arr.gate).toUpperCase()} ${icon('arrow-right')}<span class="sr">to</span> ${str(v.out.dep.gate).toUpperCase()} marked`
-    : m.gateLabel ? `${m.gateLabel} marked` : m.gateMissing ? 'Gate not posted yet' : '';
-  const kinds = new Set(m.poi.map(p => p.kind));
-  const key = [
-    m.you.some(p => p.tone === 'you') ? h`<span><i class="ap-k you"></i>${v && v.role === 'arrive' ? 'Arrival gate' : 'Your gate'}</span>` : '',
-    m.route ? h`<span><i class="ap-k rt"></i>Your walk</span>` : '',
-    m.baked || (m.role === 'arrive' && /id="route-(taxi|bus|ride)"/.test(m.svg)) ? h`<span><i class="ap-k wk"></i>${m.role === 'arrive' ? 'Ways out' : 'Curb to security'}</span>` : '',
-    h`<span><i class="ap-k gt"></i>Gates</span>`,
-    kinds.has('security') || m.you.some(p => /Security/.test(p.label)) ? h`<span><i class="ap-k sc"></i>Security</span>` : '',
-    kinds.has('food') ? h`<span><i class="ap-k fd"></i>Food</span>` : '',
-  ];
-  // "Walk me to my gate" opens the walking directions (#nav) at the gate asked for, else your next gate.
-  const mine = v && v.out ? str(v.out.dep.gate) : '';
-  const wg = gq || (v && v.role !== 'arrive' ? mine : '');
-  const walk = wg && obj(g && g.nav) ? h`<a class="ap-tb ap-wk" href="#nav/${lc(code)}/${v && v.role === 'connect' ? '@arr' : '@here'}/${encodeURIComponent(wg)}">${ic('walk', 'route')}<span>${normG(wg) === normG(mine) ? 'Walk me to my gate' : `Walk to gate ${wg.toUpperCase()}`}</span></a>` : '';
-  return h`<section class="sec ap-anc" id="ap-map">
-    <div class="ap-sh"><div class="ey">Terminal map</div>${sub ? h`<span class="ap-shs">${sub}</span>` : ''}</div>
-    <div class="ap-mw">
-      <div class="ap-mv${m.route ? ' has-rt' : ''}" data-role="${m.role || 'none'}" tabindex="0" role="img" aria-label="${`Terminal map of ${code}${m.gateLabel ? `, ${m.gateLabel} marked` : ''}. Pinch, double-tap or use the zoom buttons.`}" style="aspect-ratio:${w} / ${hh}">
-        <svg class="ap-svg" viewBox="${`${x} ${y} ${w} ${hh}`}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${raw(m.svg)}${d ? raw(`<g class="ap-ov"><path class="ap-rc" d="${d}"/><path class="ap-rt" d="${d}"/></g>`) : ''}</svg>
-        <div class="ap-pins" aria-hidden="true"></div>
-      </div>
-      <button type="button" class="ap-done" data-act="mapReset" hidden>Done</button>
-      <div class="ap-zc" role="group" aria-label="Zoom">
-        <button type="button" class="ap-z" data-act="mapZoom" data-arg="-1" aria-label="Zoom out">${icon('minus')}</button>
-        <button type="button" class="ap-z" data-act="mapZoom" data-arg="1" aria-label="Zoom in">${icon('plus')}</button>
-      </div>
-    </div>
-    ${m.gateLabel || walk ? h`<div class="ap-tools">
-      ${m.gateLabel ? h`<button type="button" class="ap-tb ap-gt" data-act="mapGate">${icon('focus-2')}<span>${m.gateLabel}</span></button>` : ''}${walk}
-    </div>` : ''}
-    <p class="ap-cap" aria-live="polite">${CAP1}</p>
-    <div class="ap-key" aria-hidden="true">${key}</div>
-    ${m.notes.length ? more(`Terminal notes (${m.notes.length})`, h`<ul class="ap-notes">${m.notes.map(n => h`<li>${n}</li>`)}</ul>`) : ''}
-    <p class="ap-src">${icon('info-circle')}<span>${src ? `Source: ${src}. ` : ''}Schematic, not to scale. Positions are approximate; follow the airport signs.</span></p>
-    ${offLink ? h`<div class="wrap ap-ml">${offLink}</div>` : ''}
-  </section>`;
-}
-
-// Live map controller for the mounted screen (zoom buttons call into it).
-// views keeps your zoom through a refresh of this page; leaving the page drops it,
-// so every visit opens at 1x where a vertical swipe scrolls the page.
-const views = {};   // code → {s, cx, cy}
-let ctl = null;
-const MAXS = 6;
-function mountMap(root, m, gq) {
-  const mv = root.querySelector('.ap-mv');
-  if (!mv || !m) return null;
-  const svg = mv.querySelector('svg.ap-svg'), layer = mv.querySelector('.ap-pins'), cap = root.querySelector('.ap-cap');
-  const wrap = mv.parentNode, done = root.querySelector('.ap-done'), zc = root.querySelector('.ap-zc');
-  const btnIn = root.querySelector('[data-act="mapZoom"][data-arg="1"]'), btnOut = root.querySelector('[data-act="mapZoom"][data-arg="-1"]');
-  const [VX, VY, VW, VH] = m.vb;
-  let W = mv.clientWidth || 1, H = mv.clientHeight || 1;
-  const fresh = !views[m.code];
-  const st = views[m.code] || (views[m.code] = {s: 1, cx: VX + VW / 2, cy: VY + VH / 2});
-  // A gate asked for in the link (#airport/phx?gate=A22): centre it, and give it a
-  // pulsing pin if it isn't already one of yours.
-  const gp = gq ? findGate(m.pts, m.lines, gq) : null;
-  const gYou = gp && m.you.find(p => Math.hypot(p.x - gp.x, p.y - gp.y) < 1);
-  const extra = gp && !gYou ? [{x: gp.x, y: gp.y, label: `Gate ${str(gq).toUpperCase()}`, tone: 'you', q: 1}] : [];
-  const k0 = () => Math.min(W / VW, H / VH);
-  const clampSt = (s, cx, cy) => {
-    s = N.clamp(s, 1, MAXS);
-    const k = k0() * s, vw = W / k, vh = H / k, mg = 24 / k;
-    const fit = (c, vis, lo, len) => vis >= len + 2 * mg ? lo + len / 2 : N.clamp(c, lo - mg + vis / 2, lo + len + mg - vis / 2);
-    return {s, cx: fit(cx, vw, VX, VW), cy: fit(cy, vh, VY, VH)};
-  };
-  Object.assign(st, clampSt(st.s, st.cx, st.cy));
-
-  // Pins: your gate(s) always, then map words and places by importance, then gate numbers when zoomed in.
-  const pins = [
-    ...[...m.you, ...extra].map(p => Object.assign({}, p, {type: 'you', pri: 0, minS: 1, labelS: 1, c: 10, q: p.q || p === gYou})),
-    ...m.lbls.map(p => Object.assign({}, p, {type: 'lbl', labelS: 1, c: 0})),
-    ...m.poi.map(p => Object.assign({}, p, {type: 'poi', c: 13})),
-    ...m.gates.filter(p => !extra.length || normG(p.label) !== normG(gq)).map(p => Object.assign({}, p, {type: 'gn', pri: 5, minS: 2.2, labelS: 1, c: 0})),
-  ].sort((a, b) => a.pri - b.pri);
-  layer.innerHTML = String(h`${pins.map(p => p.type === 'you'
-    ? h`<div class="${`ap-pin ap-you ${p.tone}${p.q ? ' q' : ''}`}"><div class="ap-pi"><span class="ap-dot"></span><span class="ap-pl">${p.label}</span></div></div>`
-    : p.type === 'poi'
-      ? h`<div class="ap-pin ap-poi k-${p.kind}"><div class="ap-pi"><span class="ap-pb">${icon(KIND_IC[p.kind] || 'point')}</span><span class="ap-pl">${p.label}</span></div></div>`
-      : p.type === 'lbl'
-        ? h`<div class="ap-pin ap-lbl al-${p.al} ${p.cls}"><div class="ap-pi">${p.label}</div></div>`
-        : h`<div class="ap-pin ap-gn al-${p.al}"><div class="ap-pi">${p.label}</div></div>`)}`);
-  [...layer.children].forEach((el, i) => { pins[i].el = el; pins[i].in = el.firstElementChild; pins[i].shown = true; pins[i].lab = null; });
-  // Measure each pin once with and without its label.
-  pins.forEach(p => {
-    p.el.classList.add('lb'); p.wl = p.in.offsetWidth; p.hh = p.in.offsetHeight || 26;
-    const pl = p.in.querySelector('.ap-pl'); p.lw = pl ? pl.offsetWidth : 0;
-    p.el.classList.remove('lb'); p.w0 = p.type === 'poi' ? 26 : p.in.offsetWidth;
-    if (p.type === 'you') p.el.classList.add('lb');
-  });
-
-  // The zoom buttons and the Done pill sit over the map; names keep clear of them.
-  let keep = [];
-  const measure = () => {
-    const r = el => [el.offsetLeft - 4, el.offsetTop - 4, el.offsetLeft + el.offsetWidth + 4, el.offsetTop + el.offsetHeight + 4];
-    keep = zc && zc.offsetWidth ? [r(zc)] : [];
-    if (done) { const hid = done.hidden; done.hidden = false; keep.doneBox = r(done); done.hidden = hid; }
-  };
-  const IN = 12;   // names stay this far inside the frame
-  const place = (k, x0, y0) => {
-    const boxes = keep.slice();
-    if (keep.doneBox && st.s > 1.01) boxes.push(keep.doneBox);
-    for (const p of pins) {
-      const x = (p.x - x0) * k, y = (p.y - y0) * k;
-      let show = st.s >= p.minS - 1e-6 && x > -30 && y > -30 && x < W + 30 && y < H + 30;
-      let lab = p.type !== 'poi' || st.s >= p.labelS;
-      // A place whose name fits on neither side shows just its icon (tap it for the name).
-      if (lab && p.type === 'poi' && x - p.c + p.wl > W - IN && x + p.c - p.wl < IN) lab = false;
-      const w = lab ? p.wl : p.w0, hh = p.hh;
-      let flip = false, box, dn = 0, off = 0;
-      if (p.type === 'gn' || p.type === 'lbl') {
-        box = p.al === 's' ? [x, y - hh / 2, x + w, y + hh / 2] : p.al === 'e' ? [x - w, y - hh / 2, x, y + hh / 2] : [x - w / 2, y - hh / 2, x + w / 2, y + hh / 2];
-        // Map words and gate numbers only show whole and clear of the frame.
-        if (box[0] < IN || box[1] < IN / 2 || box[2] > W - IN || box[3] > H - IN / 2) show = false;
-      }
-      else {
-        const fitR = x - p.c + w <= W - IN, fitL = x + p.c - w >= IN;
-        flip = lab && !fitR && fitL;
-        if (p.type === 'you' && !fitR && !fitL) {
-          // Too wide for either side: the name sits under (or over) the dot, kept inside the frame.
-          dn = y + 14 + hh <= H - 4 ? 1 : -1;
-          off = N.clamp(x - p.lw / 2, IN, Math.max(IN, W - IN - p.lw)) - x;
-          const ly = dn > 0 ? y + 14 : y - 14 - hh;
-          box = [Math.min(x - p.c, x + off), Math.min(y - p.c, ly), Math.max(x + p.c, x + off + p.lw), Math.max(y + p.c, ly + hh)];
-        } else box = flip ? [x + p.c - w, y - hh / 2, x + p.c, y + hh / 2] : [x - p.c, y - hh / 2, x - p.c + w, y + hh / 2];
-      }
-      if (show && p.type !== 'you') {
-        const pad = p.type === 'gn' ? 2 : 3;
-        if (boxes.some(b => box[0] < b[2] + pad && box[2] + pad > b[0] && box[1] < b[3] + pad && box[3] + pad > b[1])) show = false;
-      }
-      p.sx = p.type === 'gn' ? (box[0] + box[2]) / 2 : x; p.sy = y;
-      if (show) boxes.push(box);
-      if (show !== p.shown) { p.el.style.display = show ? '' : 'none'; p.shown = show; }
-      if (!show) continue;
-      p.el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
-      if (p.type === 'poi' && lab !== p.lab) { p.el.classList.toggle('lb', lab); p.lab = lab; }
-      if (flip !== p.flip) { p.el.classList.toggle('fl', flip); p.flip = flip; }
-      if (dn !== (p.dn || 0)) { p.el.classList.toggle('dn', dn > 0); p.el.classList.toggle('up', dn < 0); p.dn = dn; }
-      if (dn) p.el.style.setProperty('--dx', `${off.toFixed(1)}px`);
-    }
-  };
-  // At 1x the page keeps one-finger vertical drags (pan-y); zoomed, the map takes
-  // every drag and the Done pill is the way back to scrolling the page.
-  let zoomed = null, said = 0;
-  const say = (t, auto) => { if (cap) cap.textContent = t; if (!auto) said = performance.now(); };
-  const apply = () => {
-    const k = k0() * st.s, vw = W / k, vh = H / k, x0 = st.cx - vw / 2, y0 = st.cy - vh / 2;
-    svg.setAttribute('viewBox', `${x0.toFixed(2)} ${y0.toFixed(2)} ${vw.toFixed(2)} ${vh.toFixed(2)}`);
-    const z = st.s > 1.01;
-    if (z !== zoomed) {
-      zoomed = z;
-      wrap.classList.toggle('zoomed', z);
-      mv.style.touchAction = z ? 'none' : 'pan-y';
-      if (done) done.hidden = !z;
-      // Keep a name you just tapped on screen rather than swapping in the hint.
-      if (performance.now() - said > 600) say(z ? CAP2 : CAP1, true);
-    }
-    place(k, x0, y0);
-    if (btnIn) btnIn.disabled = st.s >= MAXS - 0.01;
-    if (btnOut) btnOut.disabled = !z;
-  };
-
-  let raf = 0;
-  const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
-  const animTo = (s, cx, cy) => {
-    const to = clampSt(s, cx, cy);
-    stop();
-    if (N.reduce) { Object.assign(st, to); apply(); return; }
-    const from = Object.assign({}, st), t0 = performance.now(), D = 320;
-    const step = t => {
-      const u = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - u, 3);
-      st.s = Math.exp(Math.log(from.s) + (Math.log(to.s) - Math.log(from.s)) * e);
-      st.cx = from.cx + (to.cx - from.cx) * e; st.cy = from.cy + (to.cy - from.cy) * e;
-      apply();
-      raf = u < 1 ? requestAnimationFrame(step) : 0;
-    };
-    raf = requestAnimationFrame(step);
-  };
-  const rel = e => { const r = mv.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
-  const toMap = p => { const k = k0() * st.s; return {x: st.cx - W / (2 * k) + p.x / k, y: st.cy - H / (2 * k) + p.y / k}; };
-  // Centre that keeps map point a under screen point p at scale s.
-  const about = (a, p, s) => { const k = k0() * N.clamp(s, 1, MAXS); return [a.x - p.x / k + W / (2 * k), a.y - p.y / k + H / (2 * k)]; };
-  const zoomAt = (p, s) => { const [cx, cy] = about(toMap(p), p, s); animTo(s, cx, cy); };
-
-  const pick = p => {
-    const k = k0() * st.s, a = toMap(p);
-    let best = null, bd = 22 / k;
-    for (const q of m.pts) { const d = Math.hypot(q.x - a.x, q.y - a.y); if (d < bd) { bd = d; best = q; } }
-    if (!best) { say(st.s > 1.01 ? CAP2 : CAP1); return; }
-    const name = best.full || best.label;
-    const KW = {security: ['Security', /security|checkpoint|tsa/i], baggage: ['Bag claim', /bag|claim|carousel/i], food: ['Food', /food|caf[eé]|coffee|deli|bar\b|restaurant/i], lounge: ['Lounge', /lounge|club|provisions/i]};
-    const kw = KW[best.kind];
-    say(best.kind === 'gate' ? `Gate ${best.label}` : kw && !kw[1].test(name) ? `${name} · ${kw[0]}` : name);
-  };
-
-  // Pointer gestures: one finger pans when zoomed, two fingers pinch, double-tap zooms.
-  const pts = new Map();
-  let gst = null, lastTap = null, tapT = 0, gs = null, pinched = false, hitT = 0, hitEl = null;
-  // A pinch that ends just above 1x goes back to 1x, so the page gets its swipes back.
-  const snap = () => { if (st.s > 1 && st.s < 1.08) animTo(1, VX + VW / 2, VY + VH / 2); };
-  // The dot under your finger rings at once; its name follows when the tap is sure.
-  const hit = p => {
-    let best = null, bd = 22;
-    for (const q of pins) if (q.shown && q.type !== 'lbl' && Number.isFinite(q.sx)) { const d = Math.hypot(q.sx - p.x, q.sy - p.y); if (d < bd) { bd = d; best = q; } }
-    if (hitEl) hitEl.classList.remove('hit');
-    clearTimeout(hitT);
-    hitEl = best && best.el;
-    if (hitEl) { hitEl.classList.add('hit'); hitT = setTimeout(() => { if (hitEl) hitEl.classList.remove('hit'); hitEl = null; }, 150); }
-  };
-  const begin = () => {
-    const a = [...pts.values()];
-    if (a.length >= 2) {
-      pinched = true;
-      const [p, q] = a, mid = {x: (p.x + q.x) / 2, y: (p.y + q.y) / 2};
-      gst = {type: 'pinch', d0: Math.hypot(p.x - q.x, p.y - q.y) || 1, s0: st.s, anchor: toMap(mid), moved: 99};
-    } else if (a.length === 1) gst = {type: 'pan', last: a[0], start: a[0], moved: 0, t0: performance.now()};
-    else gst = null;
-  };
-  const onDown = e => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    stop();
-    pts.set(e.pointerId, rel(e));
-    try { mv.setPointerCapture(e.pointerId); } catch (x) { /* not capturable */ }
-    begin();
-    if (pts.size >= 2) clearTimeout(tapT);
-    else hit(pts.get(e.pointerId));
-  };
-  const onMove = e => {
-    if (!pts.has(e.pointerId)) return;
-    const p = rel(e);
-    pts.set(e.pointerId, p);
-    if (!gst) return;
-    if (gst.type === 'pinch' && pts.size >= 2) {
-      const [a, b] = [...pts.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, mid = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
-      const s = N.clamp(gst.s0 * d / gst.d0, 1, MAXS);
-      const [cx, cy] = about(gst.anchor, mid, s);
-      Object.assign(st, clampSt(s, cx, cy)); apply();
-      e.preventDefault();
-    } else if (gst.type === 'pan') {
-      const dx = p.x - gst.last.x, dy = p.y - gst.last.y;
-      gst.last = p;
-      gst.moved = Math.max(gst.moved, Math.hypot(p.x - gst.start.x, p.y - gst.start.y));
-      if (st.s > 1.01) { const k = k0() * st.s; Object.assign(st, clampSt(st.s, st.cx - dx / k, st.cy - dy / k)); apply(); e.preventDefault(); }
-    }
-  };
-  const tap = p => {
-    const t = performance.now();
-    if (lastTap && t - lastTap.t < 320 && Math.hypot(p.x - lastTap.p.x, p.y - lastTap.p.y) < 30) {
-      lastTap = null; clearTimeout(tapT);
-      if (st.s >= MAXS - 0.01) animTo(1, VX + VW / 2, VY + VH / 2); else zoomAt(p, Math.min(MAXS, st.s * 2));
-      return;
-    }
-    lastTap = {t, p};
-    clearTimeout(tapT);
-    tapT = setTimeout(() => pick(p), 330);
-  };
-  const onUp = e => {
-    if (!pts.has(e.pointerId)) return;
-    const p = rel(e);
-    pts.delete(e.pointerId);
-    if (e.type === 'pointerup' && gst && gst.type === 'pan' && gst.moved < 8 && performance.now() - gst.t0 < 450) tap(p);
-    if (pts.size) begin(); else { gst = null; if (pinched) { pinched = false; snap(); } }
-    if (gst) gst.moved = 99;   // lifting one finger of a pinch is not a tap
-  };
-  const onWheel = e => {
-    if (!e.ctrlKey) return;   // plain wheel and two-finger scroll stay with the page
-    e.preventDefault();
-    const p = rel(e), s = N.clamp(st.s * Math.exp(-e.deltaY * 0.01), 1, MAXS);
-    const [cx, cy] = about(toMap(p), p, s);
-    stop(); Object.assign(st, clampSt(s, cx, cy)); apply();
-  };
-  // Safari: stop the page zooming; trackpad pinch on a Mac only sends gesture events.
-  const onGS = e => { e.preventDefault(); gs = pts.size ? null : {s0: st.s, p: rel(e), a: toMap(rel(e))}; };
-  const onGC = e => {
-    e.preventDefault();
-    if (!gs || pts.size || !Number.isFinite(e.scale)) return;
-    const s = N.clamp(gs.s0 * e.scale, 1, MAXS); const [cx, cy] = about(gs.a, gs.p, s);
-    Object.assign(st, clampSt(s, cx, cy)); apply();
-  };
-  const onGE = e => { e.preventDefault(); if (gs) snap(); gs = null; };
-  const onKey = e => {
-    const k = e.key;
-    if (k === '+' || k === '=') api.zoom(1);
-    else if (k === '-' || k === '_') api.zoom(-1);
-    else if (k === '0') api.reset();
-    else if (st.s > 1.01 && /^Arrow/.test(k)) {
-      const kk = k0() * st.s, d = 48 / kk;
-      const dx = k === 'ArrowLeft' ? -d : k === 'ArrowRight' ? d : 0, dy = k === 'ArrowUp' ? -d : k === 'ArrowDown' ? d : 0;
-      Object.assign(st, clampSt(st.s, st.cx + dx, st.cy + dy)); apply();
-    } else return;
-    e.preventDefault();
-  };
-  const on = [['pointerdown', onDown], ['pointermove', onMove], ['pointerup', onUp], ['pointercancel', onUp], ['lostpointercapture', onUp],
-    ['wheel', onWheel, {passive: false}], ['gesturestart', onGS], ['gesturechange', onGC], ['gestureend', onGE], ['keydown', onKey]];
-  on.forEach(([t, f, o]) => mv.addEventListener(t, f, o || false));
-  let ro = null;
-  if (window.ResizeObserver) {
-    ro = new ResizeObserver(() => {
-      const w = mv.clientWidth, hh = mv.clientHeight;
-      if (w && hh && (w !== W || hh !== H)) { W = w; H = hh; measure(); Object.assign(st, clampSt(st.s, st.cx, st.cy)); apply(); }
-    });
-    ro.observe(mv);
-  }
-  measure();
-  apply();
-  if (gp && fresh) animTo(2.2, gp.x, gp.y);
-
-  const api = {
-    busy: () => pts.size > 0 || !!raf,
-    zoom: dir => {
-      const f = dir > 0 ? 1.8 : 1 / 1.8, kk = k0() * st.s;
-      // + keeps your gate on screen: while it is in view, zoom about it and ease it halfway
-      // toward the middle; otherwise (or for −) zoom about the centre.
-      const a = m.you.find(p => p.tone === 'you') || m.you[0];
-      const seen = dir > 0 && a && Math.abs(a.x - st.cx) * kk < W / 2 && Math.abs(a.y - st.cy) * kk < H / 2;
-      animTo(st.s * f, seen ? a.x + (st.cx - a.x) / f / 2 : st.cx, seen ? a.y + (st.cy - a.y) / f / 2 : st.cy);
-    },
-    reset: () => { animTo(1, VX + VW / 2, VY + VH / 2); say(CAP1); },
-    gate: () => {
-      if (!m.focus) return;
-      const [x0, y0, x1, y1] = m.focus, pad = 26;
-      const bw = Math.max(40, x1 - x0 + pad * 2), bh = Math.max(40, y1 - y0 + pad * 2);
-      const s = N.clamp(Math.min(W / (bw * k0()), H / (bh * k0())), 1.5, 4);
-      const k = k0() * s, hw = W / (2 * k), hv = H / (2 * k), mg = 44 / k;
-      let cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-      // When the whole walk does not fit, keep your gate and its label in view.
-      const a = m.you.find(p => p.tone === 'you') || m.you[0];
-      if (a) { cx = N.clamp(cx, a.x - hw + mg, a.x + hw - mg); cy = N.clamp(cy, a.y - hv + mg, a.y + hv - mg); }
-      animTo(s, cx, cy);
-      say(m.you.map(p => p.label).join(' to ') || m.gateLabel);
-    },
-    cleanup: () => {
-      stop(); clearTimeout(tapT); clearTimeout(hitT);
-      on.forEach(([t, f, o]) => mv.removeEventListener(t, f, o || false));
-      if (ro) ro.disconnect();
-    },
-  };
-  return api;
 }
 
 // ---------- lower sections ----------
@@ -1429,13 +1041,14 @@ const routeId = x => {
 };
 function groundHtml(code, v) {
   const g = guide(code);
-  const list = arr(g && g.ground).filter(obj);
-  if (!list.length) return '';
   const nyc = code === 'LGA';
   const into = !v || v.role === 'arrive';
-  // Outside NYC the guide's ground list is written for getting to the airport,
-  // so on an arrival it gets a neutral title rather than "Leaving".
-  const title = !into ? `Getting to ${code}` : nyc ? `Leaving ${code}` : `To and from ${code}`;
+  // Outside NYC the ground list is written for getting to the airport; an option's
+  // `arrive` block rewrites it for the way home (pickup curb instead of drop-off).
+  const list = arr(g && g.ground).filter(obj).map(x => (into && !nyc && obj(x.arrive) ? Object.assign({}, x, x.arrive) : x));
+  if (!list.length) return '';
+  const home = into && !nyc && list.some(x => obj(x.arrive));
+  const title = !into ? `Getting to ${code}` : nyc ? `Leaving ${code}` : home ? `Getting home from ${code}` : `To and from ${code}`;
   const rows = list.map(x => {
     const mn = arr(x.min).filter(n => Number.isFinite(+n));
     const t = mn.length ? `${mn[0]}${mn[1] && mn[1] !== mn[0] ? `–${mn[1]}` : ''} min` : '';
@@ -1517,88 +1130,270 @@ function emptyHero(title, sub) {
   return h`<div class="ap-hero ap-e"><div class="ps ap-ps" role="group" aria-label="Airport">${codes().map(c => h`<button type="button" data-act="ap" data-arg="${lc(c)}" aria-pressed="false">${c}</button>`)}</div>
     <div class="ap-top"><h1 class="hl"><b>${title}</b></h1>${sub ? h`<p class="ap-sub"><span>${sub}</span></p>` : ''}</div></div>`;
 }
+
+// ---------- the map card ----------
+// The page while it is on screen: {code, hash, k, m, M (the map), rkey/ykey (what the map
+// shows), full, pop (a tapped place), pk (the open picker's end), offs, at, sig, html}.
+let S = null;
+let chipsOn = [];      // map overlays turned on (OVER ids); off until you tap one, memory only
+let linked = null;     // the code an old #nav link just opened, to bring the map up
+let pending = null;    // what render() wrote, handed to mount() as S.html
+// Room for the overlay chips (top) and the level rail and buttons (right).
+const PAD = {top: 62, bottom: 30, left: 18, right: 64};
+const chipIds = () => OVER.filter(x => chipsOn.includes(x[0])).flatMap(x => x[3]);
+const rkeyOf = m => `${epKey(m.from)}>${arr(m.via).map(epKey).join(',')}>${epKey(m.to)}|${m.R ? m.R.s : 'x'}`;
+const ykeyOf = m => m.you ? `${m.you.lon.toFixed(5)},${m.you.lat.toFixed(5)},${Math.round(m.you.acc)},${m.you.level}` : '';
+const PLACE_IC = {curb_dep: 'car', curb_arr: 'car', checkin: 'luggage', checkpoint: 'shield-check', precheck: 'shield-check', baggage: 'luggage',
+  rideshare: 'car-suv', taxi: 'car', bus: 'bus', shuttle: 'bus', train: 'train', subway: 'train', parking: 'car', rental_car: 'car', exit: 'door-exit'};
+const concName = c => !c ? 'Gates' : /^[A-Z]$/i.test(c) ? `Concourse ${c.toUpperCase()}` : /concourse|terminal|gates/i.test(c) ? c : `${c} concourse`;
+const levelIds = P => arr(P && P.data.levels).map(l => l.id);
+const levelOf = (P, arg) => levelIds(P).find(id => String(id) === str(arg));
+const isRose = x => String(x).startsWith('<div class="co rose"');
+
+// An old #nav link's From and To, taken once (memory only). "@arr" and "@dep" are what
+// the route starts with anyway, so only other places replace the defaults.
+function takeRoute(code) {
+  const ar = N.airportRoute;
+  if (!ar) return;
+  N.airportRoute = null;
+  if (str(ar.code).toUpperCase() !== code || !(Date.now() - (+ar.at || 0) < 10000)) return;
+  const keep = x => { x = str(x).trim(); return x && !/^@(arr|dep|here)$/.test(x) ? x : ''; };
+  const s = {}, f = keep(ar.from), t = keep(ar.to), via = arr(ar.via).map(keep).filter(Boolean);
+  if (f) s.from = f;
+  if (t) s.to = t;
+  if (via.length) s.via = via;
+  const v = curVisit(code, visitsOf(code));
+  sel[`${code}|${v ? v.key : ''}`] = s;
+  linked = code;
+}
+
+// From and To, and on an arrival where you are heading and how.
+function exHtml(m) {
+  const {code, v} = m;
+  if (!v || v.role !== 'arrive') return '';
+  const eta = exitEta(code, v, m.ex);
+  return h`<div class="ap-ex">
+    <p class="ey ap-exh">${m.ex.to === 'home' ? 'Your way home' : 'Your way out'}</p>
+    <div class="seg ap-xto" role="group" aria-label="Heading to">${[['hotel', 'Hotel', 'bed'], ['home', 'Home', 'home']].map(([id, lab, i]) => h`<button type="button" data-act="exitTo" data-arg="${id}" aria-pressed="${String(m.ex.to === id)}">${ic(i, 'map-pin')}${lab}</button>`)}</div>
+    <div class="ap-how" role="group" aria-label="How you leave">${HOW.map(([id, lab, i]) => h`<button type="button" class="ap-hw" data-act="exitHow" data-arg="${id}" aria-pressed="${String(m.ex.how === id)}">${ic(i, 'car')}<span>${lab}</span></button>`)}</div>
+    ${eta ? h`<p class="ap-eta">${ic('clock')}<span>${eta}</span></p>` : ''}
+  </div>`;
+}
+function ftHtml(m) {
+  const {code, P, R, v} = m;
+  if (Ps[code] === null) return '';
+  const fromL = m.from ? (m.fromHere ? 'Your location' : epLabel(P, m.from, R && R.from)) : v && v.role === 'connect' ? 'Arrival gate not posted' : 'Choose a start';
+  const toL = m.to ? epLabel(P, m.to, R && R.to) : v && v.role !== 'arrive' ? 'Gate not posted' : 'Choose a place';
+  const btn = (end, lab, val, dot) => h`<button type="button" class="ap-fr" data-act="pick" data-arg="${end}" aria-label="${lab}: ${val}. Choose another">
+    <span class="${N.cls('ap-dot', dot)}" aria-hidden="true"></span><span class="grow"><small>${lab}</small><b>${val}</b></span>${ic('chevron-down', 'chevron-right', 'ap-chev')}</button>`;
+  return h`<div class="ap-fts"><div class="ap-frs">${btn('from', 'From', fromL, m.fromHere ? 'you' : 'fr')}${btn('to', 'To', toL, 'to')}</div>
+    <button type="button" class="ap-sw" data-act="swap" aria-label="Swap start and end">${ic('arrows-sort', 'route')}</button></div>`;
+}
+
+// What sits over the map: overlay chips, the level rail, the buttons and a tapped place.
+function overHtml(m) {
+  const {code, P, R} = m;
+  if (Ps[code] === null) return h`<div class="ap-nomap">${ic('map-2', 'map-pin')}<span><b>No map for ${code} on this phone yet.</b> The steps and guide below still work.</span></div>`;
+  if (!P) return h`<div class="ap-ml2" role="status"><span class="ap-sp" aria-hidden="true"></span><span>Loading the ${code} map…</span></div>`;
+  const cur = S && S.M ? S.M.level : R ? R.from.l : P.data.defaultLevel;
+  const onR = new Set(R ? arr(R.levels) : []);
+  const lv = arr(P.data.levels).slice().reverse();   // top floor first, like a lift panel
+  const full = !!(S && S.full);
+  const q = S && S.code === code ? S.pop : null;
+  return h`<div class="ap-chips" data-hscroll role="group" aria-label="Show on the map">${OVER.map(([id, lab, i]) => h`<button type="button" class="chip ap-ch" data-act="chip" data-arg="${id}" aria-pressed="${String(chipsOn.includes(id))}">${ic(i, 'map-pin')}${lab}</button>`)}</div>
+    ${lv.length > 1 ? h`<div class="ap-rl" role="group" aria-label="Floor">${lv.map(l => h`<button type="button" data-act="lvl" data-arg="${l.id}" aria-pressed="${String(l.id === cur)}" aria-label="${l.name || `Level ${l.short || l.id}`}${onR.has(l.id) ? ', on your route' : ''}">${l.short || l.id}${onR.has(l.id) ? h`<i class="on" aria-hidden="true"></i>` : ''}</button>`)}</div>` : ''}
+    <div class="ap-tools2">
+      <button type="button" class="ap-tl ap-fs" data-act="${full ? 'unfull' : 'full'}" aria-label="${full ? 'Close the full-screen map' : 'Full-screen map'}">${ic(full ? 'x' : 'arrows-maximize', 'map-2')}</button>
+      <button type="button" class="ap-tl" data-act="locate" aria-label="Show where I am">${ic('current-location', 'map-pin')}</button>
+      <button type="button" class="ap-tl" data-act="recenter" aria-label="${R ? 'Show the whole route' : 'Show the whole airport'}">${ic(R ? 'route' : 'map', 'route')}</button>
+    </div>
+    ${q ? h`<div class="ap-pop" role="group" aria-label="${q.name}">
+      <span class="ic">${ic(POI_IC[q.cat], 'map-pin')}</span>
+      <span class="grow"><b>${q.name}</b><small>${meta([lvName(P, q.level), q.near])}</small></span>
+      <button type="button" class="ap-pgo" data-act="pickset" data-arg="to|poi:${q.id}">${ic('route', 'walk')}<span>Route here</span></button>
+      <button type="button" class="ap-px" data-act="popx" aria-label="Close">${ic('x')}</button>
+    </div>` : ''}`;
+}
+
+// ---------- the route, step by step ----------
+const STEP_IC = {walk: 'walk', moving: 'walk', train: 'train', elevator: 'elevator', stairs: 'stairs', security: 'shield-check', exit: 'door-exit'};
+function stepIcon(x, R) {
+  if (x.kind === 'escalator') return x.to != null && x.to < x.level ? 'escalator-down' : 'escalator-up';
+  if (x.kind === 'start') return R.from.kind === 'pt' ? 'current-location' : R.from.kind === 'gate' ? 'plane-arrival' : PLACE_IC[R.from.kind] || 'map-pin';
+  if (x.kind === 'arrive') return R.to.kind === 'gate' ? 'plane-departure' : /curb|rideshare|taxi/.test(str(R.to.kind)) ? 'car' : PLACE_IC[R.to.kind] || 'flag';
+  return STEP_IC[x.kind] || 'walk';
+}
+function routeHtml(m) {
+  const {code, P, R, v} = m;
+  if (Ps[code] === null) return '';
+  let head = '', body;
+  // No route yet: a card that says what it waits on, not a stray grey line.
+  const note = (t, i = 'route') => h`<div class="ap-re">${ic(i, 'route')}<span>${t}</span></div>`;
+  if (!P) body = note('The route shows here once the map has loaded.');
+  else if (R && R.hops && !R.hops.length) body = note(h`<b>You’re there.</b> ${epLabel(P, m.to, R.to)} is where you are.`, 'flag');
+  else if (R) {
+    head = `${R.mins} min · ${fmtM(R.m)}`;
+    const sec = arr(R.steps).some(x => x.kind === 'security');
+    // The floor shows where it changes (and on the first step), not on every row.
+    body = h`<ol class="ap-rs">${arr(R.steps).map((x, i, xs) => {
+      const sm = meta([i && xs[i - 1].level === x.level ? '' : lvName(P, x.level), x.s >= 45 ? `about ${Math.round(x.s / 60)} min` : '']);
+      return h`<li><button type="button" class="ap-rr" data-act="step" data-arg="${x.level}">
+        <span class="ap-ri">${ic(stepIcon(x, R), 'walk')}</span>
+        <span class="grow"><b>${x.text}</b>${sm.length ? h`<small>${sm}</small>` : ''}</span></button></li>`;
+    })}</ol>
+      ${sec ? h`<p class="ap-rn">Times include a usual wait at security.</p>` : ''}
+      ${m.d.off && !m.userTo && m.d.gate ? h`<p class="ap-rn">Gate ${m.d.gate.toUpperCase()} isn’t on this map, so the route ends at security.</p>` : ''}`;
+  } else if (v && v.role === 'connect' && !m.from) body = note('Your route starts once AA posts the gate you land at. Or choose a start above.');
+  else if (v && v.role !== 'arrive' && !m.to) body = note('Your next gate isn’t posted yet. The route shows here once AA posts it, or choose a place above.');
+  else if (!m.to) body = note('Choose where you’re going.');
+  else if (!m.from) body = note('Choose where you’re starting.');
+  else body = note('No walking route between these on the map.');
+  return h`<section class="sec ap-anc" id="ap-route"><div class="ap-sh"><span class="ey">Route</span>${head ? h`<span class="ap-rt tn" data-k="ap-rt">${head}</span>` : ''}</div>${body}</section>`;
+}
+
+// Food (and, when their chips are on, restrooms and water) by the detour each adds.
+function alongHtml(m) {
+  const {P, R} = m;
+  if (!P || !R || !R.hops || !R.hops.length || !N.airmap) return '';
+  const groups = [['Food and coffee', ['food', 'coffee'], 6]];
+  if (chipsOn.includes('restroom')) groups.push(['Restrooms', ['restroom'], 3]);
+  if (chipsOn.includes('water')) groups.push(['Water', ['water'], 3]);
+  const out = groups.map(([t, ids, n]) => {
+    let xs = [];
+    try { xs = N.airmap.poisAlong(P, R, ids, n); } catch (e) { xs = []; }
+    return xs.length ? h`${groups.length > 1 ? h`<div class="ap-subh">${t}</div>` : ''}<div class="ap-als">${xs.map(x => h`<button type="button" class="ap-al" data-act="poi" data-arg="${x.id}">
+      <span class="ic">${ic(POI_IC[x.cat], 'map-pin')}</span><span class="grow"><b>${x.name}</b><small>${meta([x.near, lvName(P, x.level), x.detour_min ? `+${x.detour_min} min` : 'On the way'])}</small></span>${icon('chevron-right', 'ap-chev')}</button>`)}</div>` : '';
+  }).filter(Boolean);
+  if (!out.length) return '';
+  return h`<section class="sec ap-anc" id="ap-along"><div class="ap-sh"><span class="ey">${groups.length > 1 ? 'On your way' : 'Food on your way'}</span></div>${out}</section>`;
+}
+
+function headHtml(m, cos) {
+  const {code, list, v} = m;
+  const seg = list.length > 1 ? h`<div class="seg ap-seg" role="group" aria-label="Which visit">${list.map(x => h`<button type="button" data-act="visit" data-arg="${x.key}" aria-pressed="${x === v ? 'true' : 'false'}">${roleWord(x.role)} ${dayOf(x, code).split(' ').slice(0, 2).join(' ')}</button>`)}</div>` : '';
+  const rose = cos.filter(isRose);
+  return h`${seg}${rose.length ? h`<div class="stack8 ap-cos">${rose}</div>` : ''}`;
+}
+function belowHtml(m, cos) {
+  const {code, v} = m, g = guide(code);
+  const rest = cos.filter(x => !isRose(x));
+  return h`${routeHtml(m)}
+    ${rest.length ? h`<div class="sec stack8 ap-cos">${rest}</div>` : ''}
+    ${stepsHtml(code, v, m)}
+    ${flightsHtml(code, v)}
+    ${groundHtml(code, v)}
+    ${alongHtml(m)}
+    ${foodHtml(code, v)}
+    ${!g ? h`<div class="sec co plain ap-ng">${icon('info-circle')}<span><b>No guide for ${code}.</b> Only flight and conditions data are shown.</span></div>` : ''}
+    ${tilesHtml(code, v)}
+    ${securityHtml(code, v)}
+    ${servicesHtml(code)}
+    ${infoHtml(code, v)}`;
+}
+
 function render(ctx) {
   const code = codeOf(ctx);
   const known = codes();
+  pending = null;
   if (!/^[A-Z]{3}$/.test(code) || (!known.includes(code) && !guide(code))) {
     return {hero: emptyHero('Airport not on this trip', `“${str(ctx.param).replace(/\?.*$/, '').slice(0, 12)}” isn’t one of your airports.`),
       body: h`<div class="ap-pg"><div class="co plain">${icon('building-airport')}<span><b>Pick an airport.</b> Choose one of yours above, or open the one that matters now.</span></div>
         <div class="wrap ap-ml"><a class="chip cr ap-c44" href="#airports">${icon('current-location')}Airport for right now</a></div></div>`};
   }
+  takeRoute(code);
   const auto = autoCode();
-  const list = visitsOf(code);
-  const v = curVisit(code, list);
+  const m = plan(ctx);
   const g = guide(code);
   if (!g && !N.data.trip) {
-    return {hero: heroHtml(code, v, list, auto),
+    return {hero: heroHtml(code, m.v, m.list, auto, m),
       body: h`<div class="ap-pg"><div class="co plain">${icon('info-circle')}<span><b>Guide not loaded.</b> Open the app once with signal to put it on this phone.</span></div></div>`};
   }
-  const seg = list.length > 1 ? h`<div class="seg ap-seg" role="group" aria-label="Which visit">${list.map(x => h`<button type="button" data-act="visit" data-arg="${x.key}" aria-pressed="${x === v ? 'true' : 'false'}">${roleWord(x.role)} ${dayOf(x, code).split(' ').slice(0, 2).join(' ')}</button>`)}</div>` : '';
-  const cos = callouts(code, v);
-  const arrive = v && v.role === 'arrive';
-  // Build the sections first so a jump chip only appears when its section is on the page
-  // (a chip with nothing to scroll to is a dead button), in the order they appear.
-  const S = {steps: stepsHtml(code, v), map: mapHtml(code, v, qGate(ctx)), ground: groundHtml(code, v), sec: securityHtml(code, v),
-    food: foodHtml(code, v), svc: servicesHtml(code), info: infoHtml(code, v)};
-  const has = k => !!String(S[k] || '').trim();
-  const order = arrive ? ['steps', 'map', 'ground', 'sec', 'food', 'svc', 'info'] : ['steps', 'map', 'sec', 'food', 'svc', 'ground', 'info'];
-  const label = {steps: ['Steps', 'checklist'], map: ['Map', 'map-2'], sec: ['Security', 'shield-check'], food: ['Food', 'tools-kitchen-2'],
-    ground: [!arrive ? 'Getting here' : code === 'LGA' ? 'Leaving' : 'Ground', 'route'], svc: ['Services', 'wifi'], info: ['Info', 'info-circle']};
-  // With no guide every section below is an empty state, so say that once up top instead of a jump bar.
-  const jumps = g ? order.filter(has) : [];
+  const cos = callouts(code, m.v);
+  // The blocks update() patches, kept as written so the first update compares like with like.
+  const html = {hero: String(heroHtml(code, m.v, m.list, auto, m)), 'ap-head': String(headHtml(m, cos)), 'ap-ft': String(ftHtml(m)),
+    'ap-mo': String(overHtml(m)), 'ap-ex': String(exHtml(m)), 'ap-below': String(belowHtml(m, cos))};
+  pending = {code, html};
   const body = h`<div class="ap-pg">
-    ${seg}
-    ${tilesHtml(code, v)}
-    ${cos.length ? h`<div class="stack8 ap-cos">${cos}</div>` : ''}
-    ${flightsHtml(code, v)}
-    ${!g ? h`<div class="co plain ap-ng">${icon('info-circle')}<span><b>No guide for ${code}.</b> Only flight and conditions data are shown.</span></div>` : ''}
-    ${jumps.length > 1 ? h`<nav class="ap-jump" data-hscroll aria-label="Jump to">${jumps.map(id => h`<button type="button" class="ap-j" data-act="jump" data-arg="${id}">${icon(label[id][1])}${label[id][0]}</button>`)}</nav>` : ''}
-    ${order.map(k => S[k])}
+    <div class="ap-head" id="ap-head">${raw(html['ap-head'])}</div>
+    <section class="${N.cls('ap-mc ap-anc', Ps[code] === null && 'none')}" id="ap-mc" aria-label="${code} map">
+      <div class="ap-ft" id="ap-ft">${raw(html['ap-ft'])}</div>
+      <div class="ap-mw"><div class="ap-mh" id="ap-mh"></div><div class="ap-mo" id="ap-mo">${raw(html['ap-mo'])}</div></div>
+    </section>
+    <div class="ap-exw" id="ap-ex">${raw(html['ap-ex'])}</div>
+    <div class="ap-below" id="ap-below">${raw(html['ap-below'])}</div>
   </div>`;
-  return {hero: heroHtml(code, v, list, auto), body};
+  return {hero: raw(html.hero), body};
 }
 
-// The jump bar pins under the top bar; the chip for the section under it is filled.
-function mountJump(view) {
-  const pg = view.querySelector('.ap-pg'), bar = pg && pg.querySelector('.ap-jump'), sc = document.getElementById('view');
-  if (!bar || !sc) return () => {};
-  const tb = sc.querySelector('.tb'), strip = document.getElementById('strip');
-  const top = (tb ? tb.offsetHeight : 56) + (strip && strip.childElementCount ? strip.offsetHeight : 0);
-  pg.style.setProperty('--ap-jt', `${top}px`);
-  const chips = [...bar.querySelectorAll('.ap-j')], on = new Set();
-  let cur = null, raf = 0;
-  const mark = b => {
-    if (b === cur) return;
-    cur = b;
-    chips.forEach(c => c === b ? c.setAttribute('aria-current', 'true') : c.removeAttribute('aria-current'));
-    // Keep the filled chip in sight inside the bar.
-    if (b && (b.offsetLeft < bar.scrollLeft + 20 || b.offsetLeft + b.offsetWidth > bar.scrollLeft + bar.clientWidth - 20)) {
-      bar.scrollTo({left: Math.max(0, b.offsetLeft - 20), behavior: N.reduce ? 'auto' : 'smooth'});
-    }
-  };
-  const line = () => top + bar.offsetHeight + 8;
-  // A section counts once it reaches the line under the bar; between two sections the last one stays.
-  const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => {
-    es.forEach(e => e.isIntersecting ? on.add(e.target.id) : on.delete(e.target.id));
-    const b = chips.find(c => on.has('ap-' + c.dataset.arg));
-    const first = document.getElementById('ap-' + (chips[0] && chips[0].dataset.arg));
-    if (b) mark(b);
-    else if (first && first.getBoundingClientRect().top > line()) mark(null);
-  }, {root: sc, rootMargin: `-${line()}px 0px -55% 0px`}) : null;
-  if (io) chips.forEach(c => { const t = document.getElementById('ap-' + c.dataset.arg); if (t) io.observe(t); });
-  // A hairline under the bar only while it is pinned.
-  const pin = () => { raf = 0; bar.classList.toggle('stuck', bar.getBoundingClientRect().top <= top + 0.5); };
-  const onScroll = () => { if (!raf) raf = requestAnimationFrame(pin); };
-  sc.addEventListener('scroll', onScroll, {passive: true});
-  pin();
-  return () => { if (io) io.disconnect(); sc.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf); };
+// ---------- mount, update, teardown ----------
+// Replace a block only when its markup changed (the string we last wrote, not the DOM's).
+// The clock text ticks on its own (core's data-clock), so it never forces a rewrite.
+const unclock = s => String(s || '').replace(/(data-clock="[A-Z]{3}">)[^<]*/g, '$1');
+function setH(id, html) {
+  const e = document.getElementById(id), s = String(html || '');
+  if (!e || !S) return;
+  if (unclock(S.html[id]) === unclock(s)) return;
+  S.html[id] = s;
+  e.innerHTML = s;
+}
+const paintOverlay = () => { if (S && S.m) setH('ap-mo', overHtml(S.m)); };
+function showMap(instant) {
+  const mc = document.getElementById('ap-mc');
+  if (mc && !(S && S.full)) mc.scrollIntoView({block: 'start', behavior: instant || N.reduce ? 'auto' : 'smooth'});
+}
+function attachMap(m) {
+  const el = document.getElementById('ap-mh');
+  if (!S || !el || !m.P || !N.airmap || S.M) return;
+  try {
+    S.M = N.airmap.mount(el, m.P, {route: m.R, chips: chipIds(), padding: PAD,
+      cover: () => document.querySelectorAll('#ap-mo .ap-rl, #ap-mo .ap-tl, #ap-mo .ap-ch, #ap-mo .ap-pop'),
+      onLevel: () => paintOverlay(),
+      onPoi: q => { if (S) { S.pop = q; paintOverlay(); } },
+      onReady: () => paintOverlay()});
+    S.rkey = rkeyOf(m);
+    S.ykey = ykeyOf(m);
+    if (m.you) S.M.setYou(m.you);
+  } catch (e) { N.report(e, 'airports map'); S.M = null; }
+}
+// Full screen: the card covers the page under the top bar; the tab bar steps aside.
+function setFull(on) {
+  on = !!on;
+  const mc = document.getElementById('ap-mc'), view = document.getElementById('view'), app = document.getElementById('app');
+  if (S) S.full = on;
+  if (mc) {
+    const st = document.getElementById('strip');
+    mc.style.setProperty('--ap-strip', `${on && st ? st.offsetHeight : 0}px`);
+    mc.classList.toggle('full', on);
+  }
+  if (view) view.classList.toggle('ap-mapfull', on);
+  if (app) app.classList.toggle('ap-mapfull', on);
+  paintOverlay();
+  requestAnimationFrame(() => { if (S && S.M) { S.M.resize(); S.M.fit('route'); } });
+}
+function closePicker(refocus) {
+  const had = document.querySelector('body > .ap-pk');
+  document.querySelectorAll('body > .ap-pk').forEach(n => n.remove());
+  const end = S && S.pk;
+  if (S) S.pk = null;
+  if (had && refocus && end) { const b = document.querySelector(`.ap-fr[data-arg="${end}"]`); if (b) b.focus({preventScroll: true}); }
+}
+function teardown() {
+  closePicker();
+  const view = document.getElementById('view'), app = document.getElementById('app');
+  if (view) view.classList.remove('ap-mapfull');
+  if (app) app.classList.remove('ap-mapfull');
+  if (!S) return;
+  const s = S;
+  S = null;
+  try { if (s.M) s.M.destroy(); } catch (e) { /* already gone */ }
+  s.offs.forEach(f => { try { f(); } catch (e) { /* ignore */ } });
 }
 
 let slide = null, slideT = 0;   // switch animation between two airports on the same screen
 const sig = ctx => { const code = codeOf(ctx); const list = visitsOf(code); const v = curVisit(code, list); return `${code}|${v ? v.key : ''}|${v ? overV(v) : ''}|${autoCode()}`; };
 function mount(ctx, view) {
+  teardown();
   const code = codeOf(ctx);
-  this._sig = sig(ctx);
   if (slide && performance.now() - slide.at < 1200 && !N.reduce) {
     const dir = slide.dir;
     [view.querySelector('.ap-top'), document.getElementById('body')].filter(Boolean).forEach((n, i) => {
@@ -1608,27 +1403,156 @@ function mount(ctx, view) {
     });
   }
   slide = null; clearTimeout(slideT);
-  const fresh = !views[code], hash = ctx.hash, gq = qGate(ctx);
-  ctl = mountMap(view, models[code], gq);
-  const offJump = mountJump(view);
-  // Opened from a gate link: bring the map up under the bar (after core resets the scroll).
-  if (gq && fresh && ctl) requestAnimationFrame(() => { const a = document.getElementById('ap-map'); if (a) a.scrollIntoView({block: 'start'}); });
-  return () => {
-    offJump();
-    if (ctl) { ctl.cleanup(); ctl = null; }
-    // Leaving the page (not a refresh of it) drops the zoom, so the next visit opens at 1x.
-    if (N.route().hash !== hash) delete views[code];
+  const m = plan(ctx);
+  const html = pending && pending.code === code ? pending.html : {};
+  pending = null;
+  S = {code, hash: ctx.hash, k: m.k, m, M: null, rkey: '', ykey: '', full: false, pop: null, pk: null, offs: [], at: performance.now(), sig: sig(ctx), html, wAt: Date.now()};
+  const kd = ev => {
+    if (ev.key !== 'Escape') return;
+    if (document.querySelector('body > .ap-pk')) closePicker(true);
+    else if (S && S.full) setFull(false);
   };
+  document.addEventListener('keydown', kd);
+  S.offs.push(() => document.removeEventListener('keydown', kd));
+  if (!document.getElementById('ap-mc')) return teardown;
+  // A new fix moves "you" and the start of the route.
+  S.offs.push(N.on('where', () => { if (S) N.rerender(); }));
+  try { if (N.whereOk && N.whereOk()) N.where().catch(() => {}); } catch (e) { /* no location */ }
+  const P = Ps[code];
+  if (P) attachMap(m);
+  else if (!N.airmap) keepP(code, null);
+  else if (P === undefined || Date.now() - (triedAt[code] || 0) > 30000) {
+    N.airmap.load(code).then(p => { keepP(code, p); if (S && S.code === code) N.rerender(); })
+      .catch(() => { keepP(code, null); if (S && S.code === code) N.rerender(); });
+  }
+  // Opened from a gate link or an old map link: bring the map up under the bar.
+  if (linked === code || qGate(ctx)) requestAnimationFrame(() => { if (S && S.code === code) showMap(true); });
+  linked = null;
+  return teardown;
+}
+function repaint(ctx) {
+  teardown();
+  let out;
+  try { out = render(ctx) || {}; } catch (e) {
+    N.report(e, 'render airports');
+    out = {hero: h`<h1 class="hl">Something went wrong</h1>`, body: h`<div class="co plain">${icon('alert-circle')}<span><b>This screen hit a problem.</b> Your saved data is safe. <button class="chip" data-act="reload">Reload</button></span></div>`};
+  }
+  const hero = document.getElementById('hero'), body = document.getElementById('body');
+  if (hero) hero.innerHTML = String(out.hero || '');
+  if (body) body.innerHTML = String(out.body || '');
+  document.title = `${codeOf(ctx)} airport · nyc.`;
+  try { mount(ctx, document.getElementById('view')); } catch (e) { N.report(e, 'mount airports'); }
+}
+// A change in place: new times, status, location or a choice. The map stays put and only
+// gets a new route or position when those changed; open sections stay open.
+function update(ctx) {
+  const code = codeOf(ctx);
+  if (!S || S.code !== code || S.hash !== ctx.hash || !document.getElementById('ap-mc')) { repaint(ctx); return; }
+  const old = new Map(N.$$('[data-k]', document.getElementById('view')).map(e => [e.dataset.k, e.textContent]));
+  const below = document.getElementById('ap-below');
+  const openK = new Set(below ? [...below.querySelectorAll('details')].map((d, i) => d.open ? `${(d.closest('[id]') || {}).id}|${i}` : '').filter(Boolean) : []);
+  const m = plan(ctx);
+  S.m = m; S.k = m.k;
+  const cos = callouts(code, m.v);
+  if (!S.html.hero) S.html.hero = '';
+  setH('hero', heroHtml(code, m.v, m.list, autoCode(), m));
+  setH('ap-head', headHtml(m, cos));
+  setH('ap-ft', ftHtml(m));
+  setH('ap-mo', overHtml(m));
+  setH('ap-ex', exHtml(m));
+  const was = S.html['ap-below'];
+  setH('ap-below', belowHtml(m, cos));
+  if (below && was !== S.html['ap-below']) {
+    [...below.querySelectorAll('details')].forEach((d, i) => { if (openK.has(`${(d.closest('[id]') || {}).id}|${i}`)) d.open = true; });
+  }
+  const mc = document.getElementById('ap-mc');
+  if (mc) mc.classList.toggle('none', Ps[code] === null);
+  if (!S.M && m.P) attachMap(m);
+  else if (S.M) {
+    const rk = rkeyOf(m);
+    if (rk !== S.rkey) { S.rkey = rk; S.M.setRoute(m.R); }
+    const yk = ykeyOf(m);
+    if (yk !== S.ykey) { S.ykey = yk; S.M.setYou(m.you); }
+  }
+  S.sig = sig(ctx);
+  document.title = `${code} airport · nyc.`;
+  if (performance.now() - S.at < 2000) return;
+  N.$$('[data-k]', document.getElementById('view')).forEach(e => {
+    const o = old.get(e.dataset.k);
+    if (o != null && o !== e.textContent) { e.classList.remove('chg'); void e.offsetWidth; e.classList.add('chg'); }
+  });
 }
 function tick(ctx) {
+  if (!S) return;
   const s = sig(ctx);
   // Also repaint when the highlighted step changes: it comes due (shows Now),
   // or the step in progress ends and the marker moves on.
   const nx = document.querySelector('.ap-pg .ap-st.next[data-chg]');
   const chg = nx ? +nx.dataset.chg : NaN;
   const stepDue = Number.isFinite(chg) && nowMs() >= chg;
-  if (this._sig && (s !== this._sig || stepDue) && !(ctl && ctl.busy())) { this._sig = s; N.rerender(); }
+  if (s !== S.sig || stepDue) { S.sig = s; N.rerender(); return; }
+  // Keep "you" fresh while the page is open (a fix lasts two minutes in _shared).
+  if (S && Date.now() - S.wAt > 60000) {
+    S.wAt = Date.now();
+    try { if (N.whereOk && N.whereOk()) N.where().catch(() => {}); } catch (e) { /* no location */ }
+  }
 }
+
+// ---------- the From / To picker ----------
+function pickerHtml(m, end) {
+  const {P, v} = m;
+  const curK = epKey(end === 'from' ? m.from : m.to);
+  const row = (ep, label, sub, icn) => {
+    const on = end === 'from' && ep === '@here' ? m.fromHere : epKey(ep) === curK;
+    return h`<button type="button" class="ap-po" data-act="pickset" data-arg="${end}|${ep}" data-q="${lc(`${label} ${sub}`)}"${on ? raw(' aria-current="true"') : ''}>
+      <span class="ic">${ic(icn, 'map-pin')}</span><span class="grow"><b>${label}</b>${sub ? h`<small>${sub}</small>` : ''}</span>${on ? ic('check', 'check', 'ap-pkc') : ''}</button>`;
+  };
+  const sug = [], seen = new Set();
+  const add = (ep, label, sub, icn) => { if (ep && !seen.has(ep)) { seen.add(ep); sug.push(row(ep, label, sub, icn)); } };
+  if (end === 'from' && m.you) add('@here', 'Your location', 'Start where you are', 'current-location');
+  const gi = v && v.inn ? gref(P, v.inn.arr.gate) : null, go = v && v.out ? gref(P, v.out.dep.gate) : null;
+  if (gi) add(gi, epLabel(P, gi), 'Where you land', 'plane-arrival');
+  if (go) add(go, epLabel(P, go), v.role === 'connect' ? 'Your next gate' : 'Your gate', 'plane-departure');
+  if (m.qG) { const q = gref(P, m.qG); if (q) add(q, epLabel(P, q), 'Your gate', 'plane-departure'); }
+  const kinds = !v || v.role === 'depart' ? ['curb_dep', 'checkin', 'checkpoint'] : v.role === 'arrive' ? ['baggage', ...exitKinds(m.ex.how, v.dir === 'out').slice(0, 2)] : [];   // a connection stays airside
+  kinds.filter(k => hasPlace(P, k)).forEach(k => add('place:' + k, KIND_LABEL[k], 'Best one for your route', PLACE_IC[k]));
+  const places = N.airmap.places(P).map(x => row(x.ep, x.label, [KIND_LABEL[x.kind] || '', x.pre ? 'PreCheck' : '', lvName(P, x.level)].filter(Boolean).join(' · '), PLACE_IC[x.kind]));
+  const byC = new Map();
+  N.airmap.gates(P).forEach(x => { const c = str(x.concourse); if (!byC.has(c)) byC.set(c, []); byC.get(c).push(x); });
+  const mine = new Set([gi, go].filter(Boolean).map(x => x.slice(5)));
+  const gates = [...byC].map(([c, gs]) => h`<div class="ap-pkg"><div class="ey">${concName(c)}</div><div class="ap-gg">${gs.map(x => {
+    const on = epKey('gate:' + x.ref) === curK;
+    return h`<button type="button" class="${N.cls('ap-gb', mine.has(x.ref) && 'mine')}" data-act="pickset" data-arg="${end}|gate:${x.ref}" data-q="${lc(`gate ${x.ref} ${c}`)}" aria-label="Gate ${x.ref}, ${lvName(P, x.level)}"${on ? raw(' aria-current="true"') : ''}>${x.ref}</button>`;
+  })}</div></div>`);
+  const title = end === 'from' ? 'Start from' : 'Go to';
+  // Gates first where this end is most likely a gate: a connection, your gate, the gate you land at.
+  const gatesFirst = !!v && (v.role === 'connect' || (v.role === 'depart') === (end === 'to'));
+  return h`<div class="ap-pkb"></div>
+    <div class="ap-pks" role="dialog" aria-modal="true" aria-label="${title}" tabindex="-1">
+      <div class="ap-pkh"><b>${title}</b><button type="button" class="ap-pkx" data-act="pkclose" aria-label="Close">${ic('x')}</button></div>
+      <label class="ap-pkq">${ic('search')}<input type="search" data-input="pkq" placeholder="Gate or place" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search gates and places"></label>
+      <div class="ap-pkl">
+        ${sug.length ? h`<div class="ap-pkg"><div class="ey">Suggested</div>${sug}</div>` : ''}
+        ${gatesFirst ? gates : ''}
+        ${places.length ? h`<div class="ap-pkg"><div class="ey">Places</div>${places}</div>` : ''}
+        ${gatesFirst ? '' : gates}
+        <p class="ap-pke" hidden>Nothing here matches.</p>
+      </div>
+    </div>`;
+}
+function openPicker(m, end) {
+  closePicker();
+  const d = document.createElement('div');
+  d.className = 'ap-pk';
+  d.innerHTML = String(pickerHtml(m, end));
+  document.body.appendChild(d);
+  // The dim layer closes it (a plain listener: [data-act] would give it the press scale).
+  d.querySelector('.ap-pkb').addEventListener('click', () => closePicker(true));
+  if (S) S.pk = end;
+  const sh = d.querySelector('.ap-pks');
+  if (sh) sh.focus({preventScroll: true});
+}
+
 const actions = {
   ap(el, ev, ctx, arg) {
     const to = str(arg).toUpperCase(), from = codeOf(ctx);
@@ -1647,25 +1571,119 @@ const actions = {
       {duration: 160, easing: 'ease-in', fill: 'forwards'}).finished.catch(() => {}))).then(() => N.go('airport/' + lc(to), true));
   },
   visit(el, ev, ctx, arg) {
-    const code = codeOf(ctx);
-    picked[code] = str(arg);
+    picked[codeOf(ctx)] = str(arg);
+    if (S) S.pop = null;
     N.rerender();
   },
-  jump(el, ev, ctx, arg) {
-    const t = document.getElementById('ap-' + str(arg));
-    if (!t) return;
-    const d = t.querySelector('details.ap-fold');
-    if (d) d.open = true;
-    t.scrollIntoView({behavior: N.reduce ? 'auto' : 'smooth', block: 'start'});
+  // Back to what the clock and your location say: this airport, visit and route.
+  now(el, ev, ctx) {
+    Object.keys(picked).forEach(k => delete picked[k]);
+    Object.keys(sel).forEach(k => delete sel[k]);
+    if (S) S.pop = null;
+    if (ctx.name === 'airport') N.go('airports', true); else N.rerender();
   },
-  mapZoom(el, ev, ctx, arg) { if (ctl) ctl.zoom(+arg || 1); },
-  mapReset() { if (ctl) ctl.reset(); },
-  mapGate() { if (ctl) ctl.gate(); },
+  chip(el, ev, ctx, arg) {
+    if (!OVER.some(x => x[0] === arg)) return;
+    chipsOn = chipsOn.includes(arg) ? chipsOn.filter(x => x !== arg) : chipsOn.concat(arg);
+    if (S && S.M) S.M.setChips(chipIds());
+    N.rerender();
+  },
+  lvl(el, ev, ctx, arg) {
+    if (!S || !S.M || !S.m) return;
+    const l = levelOf(S.m.P, arg);
+    if (l === undefined) return;
+    S.M.setLevel(l);
+    paintOverlay();
+  },
+  step(el, ev, ctx, arg) {
+    if (!S || !S.m) return;
+    const l = levelOf(S.m.P, arg);
+    if (S.M && l !== undefined) { if (l === S.M.level) S.M.fit('route'); else S.M.setLevel(l); paintOverlay(); }
+    showMap();
+  },
+  pick(el, ev, ctx, arg) {
+    if (!S || !S.m) return;
+    if (!S.m.P) { N.toast(Ps[S.code] === null ? `No map for ${S.code} on this phone yet` : 'The map is still loading'); return; }
+    openPicker(S.m, arg === 'to' ? 'to' : 'from');
+  },
+  pkq(el) {
+    const q = lc(el.value).trim(), pk = el.closest('.ap-pk');
+    if (!pk) return;
+    let any = 0;
+    pk.querySelectorAll('[data-q]').forEach(b => { const hit = !q || b.dataset.q.includes(q); b.hidden = !hit; if (hit) any++; });
+    pk.querySelectorAll('.ap-pkg').forEach(g => { g.hidden = !g.querySelector('[data-q]:not([hidden])'); });
+    const e = pk.querySelector('.ap-pke');
+    if (e) e.hidden = !!any;
+  },
+  pickset(el, ev, ctx, arg) {
+    const s = str(arg), i = s.indexOf('|'), end = s.slice(0, i), ep = s.slice(i + 1);
+    if (!S || !S.m || (end !== 'from' && end !== 'to') || !ep) return;
+    const cur = sel[S.m.k] || (sel[S.m.k] = {});
+    if (ep === '@here') delete cur.from; else cur[end] = ep;
+    cur.via = [];
+    closePicker();
+    S.pop = null;
+    N.rerender();
+    showMap();
+  },
+  pkclose() { closePicker(true); },
+  popx() { if (S) { S.pop = null; paintOverlay(); } },
+  swap() {
+    if (!S || !S.m) return;
+    const m = S.m;
+    if (!m.from || !m.to) { N.toast('Choose both ends first'); return; }
+    sel[m.k] = {from: m.to, to: m.from, via: []};
+    S.pop = null;
+    N.rerender();
+  },
+  poi(el, ev, ctx, arg) {
+    if (!S || !S.m || !S.m.P) return;
+    const q = S.m.P.poiById.get(str(arg));
+    if (!q) return;
+    S.pop = {id: q.id, name: shortN(q.n) || 'Place', cat: q.cat, level: q.l, near: str(q.near)};
+    if (S.M) S.M.setLevel(q.l);
+    paintOverlay();
+    showMap();
+  },
+  exitTo(el, ev, ctx, arg) { if (arg === 'hotel' || arg === 'home') saveExit(codeOf(ctx), {to: arg}); },
+  exitHow(el, ev, ctx, arg) { if (HOW.some(x => x[0] === arg)) saveExit(codeOf(ctx), {how: arg}); },
+  async locate(el, ev, ctx) {
+    const code = codeOf(ctx);
+    let w = null;
+    try { w = await N.where({fresh: true}); } catch (e) { w = null; }
+    if (!w) { N.toast('Location is off. Allow it in Settings to see where you are.'); return; }
+    if (!S || S.code !== code) return;
+    if (distTo(w, code) > 3000) { N.toast(`You’re not at ${code}`); return; }
+    if (sel[S.k]) delete sel[S.k].from;
+    N.rerender();
+    requestAnimationFrame(() => { if (S && S.M) S.M.fit('you'); });
+  },
+  recenter() { if (S && S.M) S.M.fit('route'); },
+  full() { setFull(true); },
+  unfull() { setFull(false); },
+  // "Show on map" in the steps: the visit's own route.
+  tomap(el, ev, ctx) {
+    if (S && S.k) delete sel[S.k];
+    if (S) S.pop = null;
+    N.rerender();
+    showMap();
+  },
 };
+// Hotel or Home and How, per airport, on this phone. The way out follows the choice.
+function saveExit(code, patch) {
+  let all = null;
+  try { all = obj(N.get('nyc.ap.exit', null)); } catch (e) { all = null; }
+  all = Object.assign({}, all || {});
+  all[code] = Object.assign({}, obj(all[code]) || {}, patch);
+  N.set('nyc.ap.exit', all);
+  if (S) { if (sel[S.k]) delete sel[S.k].to; S.pop = null; }
+  N.rerender();
+}
 
 // 'force' is listed because core's rerender() checks `uses` before a forced repaint,
-// so without it N.rerender() (visit switch, tick) would skip this screen.
-const def = {nav: 2, tone: 'band', uses: ['trip', 'guide', 'status', 'force'], render, mount, tick, actions,
+// so without it N.rerender() (visit switch, tick, location) would skip this screen.
+// update() changes the page in place so the map is not rebuilt on every change.
+const def = {nav: 2, tone: 'band', uses: ['trip', 'guide', 'status', 'force'], render, mount, update, tick, actions,
   title: ctx => `${codeOf(ctx)} airport`};
 N.screen('airports', Object.assign({}, def));
 N.screen('airport', Object.assign({}, def));

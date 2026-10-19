@@ -5,11 +5,11 @@
      stored as normal, measurable entries rather than opaque ones).
    - Trip files and flight status are NOT handled here: core.js fetches them
      itself and keeps its own copy in the "nyc-data" cache. */
-const BUILD = "10805e8854";
+const BUILD = "3aeca4dff1";
 const SHELL = 'nyc-shell-' + BUILD;
 const TILES = 'nyc-tiles', PHOTOS = 'nyc-photos';
 const LIMIT = {[TILES]: 3000, [PHOTOS]: 1600};
-const PRECACHE = ["./","manifest.webmanifest","data/basemap.json","data/subway.json","data/walk.json","fonts/figtree.woff2","fonts/inter.woff2","fonts/intertight.woff2","icons/apple-touch-icon.png","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png","vendor/leaflet/images/layers-2x.png","vendor/leaflet/images/layers.png","vendor/leaflet/images/marker-icon-2x.png","vendor/leaflet/images/marker-icon.png","vendor/leaflet/images/marker-shadow.png","vendor/leaflet/leaflet.css","vendor/leaflet/leaflet.js"];
+const PRECACHE = ["./","manifest.webmanifest","data/basemap.json","data/subway.json","data/walk.json","fonts/figtree.woff2","fonts/inter.woff2","fonts/intertight.woff2","icons/apple-touch-icon.png","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png","vendor/leaflet/images/layers-2x.png","vendor/leaflet/images/layers.png","vendor/leaflet/images/marker-icon-2x.png","vendor/leaflet/images/marker-icon.png","vendor/leaflet/images/marker-shadow.png","vendor/leaflet/leaflet.css","vendor/leaflet/leaflet.js","vendor/maplibre/LICENSE.txt","vendor/maplibre/maplibre-gl.css","vendor/maplibre/maplibre-gl.js"];
 
 self.addEventListener('install', e => {
   e.waitUntil((async () => {

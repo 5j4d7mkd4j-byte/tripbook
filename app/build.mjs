@@ -134,6 +134,12 @@ function data() {
     sealIfChanged('guide', guide, key);
   } else say('data     guide/guide.json missing, skipped');
 
+  // Indoor airport maps (guide/indoor/<CODE>.json from tools/indoor_build.py): one sealed file per
+  // airport, fetched only when its map opens (N.sealed('indoor_clt')).
+  for (const f of list(path.join(ROOT, 'guide/indoor'), '.json')) {
+    sealIfChanged('indoor_' + path.basename(f, '.json').toLowerCase(), JSON.parse(read(f)), key);
+  }
+
   const food = readJson('food/food.json');
   if (food) sealIfChanged('food', food, key); else say('data     food/food.json missing, skipped');
 }
@@ -141,8 +147,9 @@ function data() {
 // ---------- build ----------
 function build() {
   fs.mkdirSync(OUT, {recursive: true});
-  // Remove last build's shell files but keep data/ (sealed bins are compared, not rebuilt).
-  for (const e of fs.readdirSync(OUT)) if (e !== 'data') fs.rmSync(path.join(OUT, e), {recursive: true, force: true});
+  // Remove last build's shell files but keep data/ (sealed bins are compared, not rebuilt)
+  // and preview/ (a stub that retires the old Airports preview's service worker).
+  for (const e of fs.readdirSync(OUT)) if (e !== 'data' && e !== 'preview') fs.rmSync(path.join(OUT, e), {recursive: true, force: true});
 
   const copied = copyDir(path.join(SRC, 'static'), OUT);
   const CSS = css(), JS = js(), SPRITE = sprite();

@@ -1,0 +1,21 @@
+/* Airport hero art from N.airportIllo (_illo.js). Roots: .ax (the art) and
+   .ap-hero (placement). Strokes and fills are the band mixed toward the
+   on-band white: --a1 62%, --a2 34%, --a3 17%. Fixed hex first; color-mix
+   (iOS 16.2+) replaces it where supported, so older phones never get an
+   unresolvable var() and lose the drawing. */
+.ax{--a1:#CAD7D5;--a2:#A5BBB8;--a3:#8EAAA7}
+@supports not (color:color-mix(in srgb,red 50%,blue)){
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .ax{--a1:#A5AEA7;--a2:#6F817C;--a3:#4F6561}}
+  :root[data-theme="dark"] .ax{--a1:#A5AEA7;--a2:#6F817C;--a3:#4F6561}
+}
+@supports (color:color-mix(in srgb,red 50%,blue)){
+  .ax{--a1:color-mix(in srgb,var(--ob) 62%,var(--band));--a2:color-mix(in srgb,var(--ob) 34%,var(--band));--a3:color-mix(in srgb,var(--ob) 17%,var(--band))}
+}
+.ax .p{stroke:var(--a1)}
+.ax .s{stroke:var(--a2)}
+.ax .pk{stroke:var(--a1);fill:var(--band)}
+.ax .f1{fill:var(--a3)}
+
+/* Beside the big code, ground line (y=88 of 100) on the code's baseline. Overrides
+   the older .ap-il size cap; the frame bleeds into the right gutter. */
+.ap-hero .ap-il.ax{top:108px;right:-16px;width:130px;height:83px;max-width:none;aspect-ratio:auto;overflow:hidden}

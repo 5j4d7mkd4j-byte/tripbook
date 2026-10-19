@@ -25,6 +25,8 @@ __pycache__/
 # Airport walking-navigation data and raw OpenStreetMap pulls (sealed into guide.bin).
 guide/nav/
 guide/osm/
+# Indoor airport maps and their raw venue data (third-party, sealed into data/indoor_<code>.bin).
+guide/indoor/
 # Local preview of the airport maps (plaintext guide data; tools/maps_build.py writes it).
 guide/maps_preview.html
 

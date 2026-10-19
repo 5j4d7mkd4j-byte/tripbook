@@ -199,6 +199,22 @@ async function getFile(n) {
   if (!r.ok) throw new Error(`${n} ${r.status}`);
   return r.arrayBuffer();
 }
+// Sealed files fetched on first use (data/<name>.bin, e.g. indoor_clt for an airport's indoor map).
+// The saved copy answers at once, offline too; the network refreshes it for next time.
+const sealedDocs = {};
+N.sealed = name => sealedDocs[name] || (sealedDocs[name] = (async () => {
+  if (W.__FIXTURE) return W.__FIXTURE[name] || null;
+  KEY = KEY || await keyFromStore();
+  if (!KEY) throw new Error('locked');
+  const url = fileUrl(name);
+  const fresh = getFile(name).then(async buf => {
+    await storeResponse(url, new Response(buf, {headers: {'content-type': 'application/octet-stream'}}));
+    return buf;
+  });
+  const saved = await cachedResponse(url);
+  if (saved) { fresh.catch(() => {}); return unseal(KEY, await saved.arrayBuffer()); }
+  return unseal(KEY, await fresh);
+})().catch(e => { delete sealedDocs[name]; N.report(e, 'sealed ' + name); return null; }));
 const LIVE_KEY = 'live/status.bin';
 // api.github.com is current but allows 60 unauthenticated requests an hour per IP (a 304
 // counts too, so nothing is gained by revalidating), shared by every phone on the same

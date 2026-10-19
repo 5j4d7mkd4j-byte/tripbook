@@ -1,35 +1,52 @@
-/* Airports screens (#airports, #airport/<code>). Roots: .ap-hero (hero) and
-   .ap-pg (body). Every selector starts with one of them. Colours are tokens. */
+/* Airports screens (#airports, #airport/<code>). Roots: .ap-hero (hero), .ap-pg
+   (body) and .ap-pk (the From/To picker, on body); the full-screen map also
+   marks #view and #app with .ap-mapfull. Colours are tokens. */
 
 /* ---------- hero ---------- */
-.ap-hero{position:relative;padding-top:4px;min-height:236px}
+/* Where you are going first: the gate (or the terminal until it posts), big. */
+.ap-hero{position:relative;padding-top:4px;min-height:0}
+.ap-hero .ap-row{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .ap-hero .ap-ps{position:relative;z-index:1}
 .ap-hero .ap-ps button{height:44px;min-width:58px;padding:0 15px;border-radius:22px;justify-content:center;gap:6px;font-size:15px;letter-spacing:.02em}
 /* The "now" dot: band text colour on the band, band green on the selected pill. */
 .ap-hero .ap-nd{width:7px;height:7px;border-radius:50%;background:var(--obt);flex:none}
 .ap-hero .ap-ps button[aria-pressed="true"] .ap-nd{background:var(--eb)}
 .ap-hero .ap-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.ap-hero .ap-top{position:relative;z-index:1;margin-top:18px}
+/* Back to the airport, visit and route the clock and your location pick. */
+.ap-hero .ap-now{display:inline-flex;align-items:center;gap:6px;height:44px;padding:0 16px 0 13px;border-radius:22px;flex:none;
+  background:var(--onband);color:var(--obt);font-size:14px;font-weight:800}
+.ap-hero .ap-now .i{font-size:18px}
+.ap-hero .ap-top{position:relative;z-index:1;margin-top:12px}
 .ap-hero .ap-ey{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ap-hero .ap-code{font-size:104px;margin:10px 0 0 -4px;color:var(--ob);letter-spacing:-.035em}
+/* Label, then the big line: TERMINAL / MAIN, NEXT GATE / B12, WAY OUT / Bus stop. */
+.ap-hero .ap-lab{margin-top:8px;font-size:13px;line-height:16px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--obt)}
+.ap-hero .ap-big{font-size:72px;line-height:.9;margin:4px 0 0 -3px;color:var(--ob);letter-spacing:-.035em;max-width:calc(100% - 120px);overflow-wrap:anywhere}
+/* Words (Baggage claim, Rideshare pickup) instead of a gate: smaller, and they may wrap. */
+.ap-hero .ap-big.long{font-size:40px;line-height:.95;letter-spacing:-.02em;margin:6px 0 0 -2px;max-width:calc(100% - 120px);text-wrap:balance}
 /* Body text on the band uses --obt: white (--ob) is under 4.5:1 on the light band. */
+.ap-hero .ap-gm{margin:8px 0 0;font-size:15px;font-weight:700;line-height:1.35;color:var(--obt)}
 .ap-hero .ap-sub{margin:12px 0 0;color:var(--obt)}
-.ap-hero .ap-sub b{display:block;font-size:16px;font-weight:700;line-height:1.3;text-wrap:balance}
+.ap-hero .ap-sub b{display:block;font-size:15px;font-weight:700;line-height:1.3;text-wrap:balance}
 .ap-hero .ap-sub>span{display:block;margin-top:3px;font-size:13px;font-weight:600}
-/* The art sits beside the code and ends above the subtitle. */
-.ap-hero .ap-il{right:0;top:90px;width:28%;max-width:108px;height:auto;aspect-ratio:14/15}
+/* The flight's status sits with its boarding time and the local clock. */
+.ap-hero .ap-s2{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin-top:6px;font-size:13px;font-weight:600;line-height:1.35}
+.ap-hero .ap-s2 .chip{height:26px;padding:0 10px;border-radius:13px;font-size:13px;font-weight:700;flex:none}
+.ap-hero .ap-s2>span{min-width:0}
+/* The art stands on the big line's baseline, right of it. */
+.ap-hero.ap-h2 .ap-il.ax{top:103px;right:-16px;width:118px;height:76px}
+/* Words are smaller (and may wrap): the art stands on the first line. */
+.ap-hero.ap-h2.ap-hl .ap-il.ax{top:80px}
 .ap-hero.ap-e{min-height:0}
 .ap-hero.ap-e .hl{color:var(--ob)}
+.ap-hero.ap-e .ap-top{margin-top:18px}
 
 /* ---------- body: shared bits ---------- */
-/* Sections land just under the pinned jump bar (8px bar padding x2 + 44px chip + 8px). */
-.ap-pg .ap-anc{scroll-margin-top:calc(var(--ap-jt,calc(56px + env(safe-area-inset-top,0px))) + 68px)}
+/* Sections land just under the top bar. */
+.ap-pg .ap-anc{scroll-margin-top:calc(56px + env(safe-area-inset-top,0px) + 12px)}
 .ap-pg .ap-note{margin:0 0 10px;font-size:13px;color:var(--mu);line-height:1.4}
 .ap-pg .ap-subh{margin:18px 0 4px;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mu)}
 .ap-pg .ap-sh{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;min-width:0}
 .ap-pg .ap-sh .ey{flex:none}
-.ap-pg .ap-shs{font-size:13px;color:var(--mu);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.ap-pg .ap-shs .i{font-size:14px;vertical-align:-2px}
 .ap-pg .ap-c44{height:44px;border-radius:22px;padding:0 16px;font-size:14px}
 .ap-pg .ap-ml{margin-top:12px}
 .ap-pg .ap-chev{font-size:20px;color:var(--mu);flex:none;align-self:center}
@@ -82,20 +99,7 @@
 .ap-pg .ap-fc{grid-column:3;grid-row:1;min-width:0;max-width:150px}
 .ap-pg .ap-fc>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .ap-pg .ap-fl .chip.cr{background:var(--sheet)}
-
-/* jump row */
-/* Pins under the top bar (--ap-jt, set on mount); the chip for the section in view is filled ink. */
-.ap-pg .ap-jump{position:sticky;top:var(--ap-jt,calc(56px + env(safe-area-inset-top,0px)));z-index:6;display:flex;gap:8px;overflow-x:auto;
-  margin:12px calc(-1 * max(20px,env(safe-area-inset-right,0px))) 0 calc(-1 * max(20px,env(safe-area-inset-left,0px)));
-  padding:8px max(20px,env(safe-area-inset-right,0px)) 8px max(20px,env(safe-area-inset-left,0px));
-  background:var(--sheet);scrollbar-width:none;-webkit-overflow-scrolling:touch;transition:box-shadow .2s}
-.ap-pg .ap-jump.stuck{box-shadow:0 1px 0 var(--ln)}
-.ap-pg .ap-jump::-webkit-scrollbar{display:none}
 .ap-pg .ap-ng{margin-top:16px}
-.ap-pg .ap-j{display:inline-flex;align-items:center;gap:6px;flex:none;height:44px;padding:0 15px;border-radius:22px;background:var(--cr);color:var(--ink);font-size:14px;font-weight:700}
-.ap-pg .ap-j .i{font-size:17px;color:var(--eb)}
-.ap-pg .ap-j[aria-current="true"]{background:var(--ink);color:var(--page)}
-.ap-pg .ap-j[aria-current="true"] .i{color:var(--page)}
 
 /* ---------- steps ---------- */
 .ap-pg .ap-steps{list-style:none;margin:0;padding:0}
@@ -127,115 +131,188 @@
 .ap-pg .ap-st.next .ap-tm{color:var(--eb)}
 .ap-pg .ap-st.wn .ap-si{background:var(--sd);color:var(--sdt)}
 
-/* ---------- terminal map ---------- */
-.ap-pg .ap-mw{position:relative}
-.ap-pg .ap-mv{--ap-ground:var(--cr);--ap-hall:var(--sheet);--ap-edge:var(--gh);
-  position:relative;width:100%;min-height:240px;max-height:360px;border-radius:22px;overflow:hidden;background:var(--ap-ground);
-  touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab;outline-offset:3px}
-/* Dark theme: a darker ground and lighter halls so the corridors read (tokens only). */
-@supports (color:light-dark(currentcolor,currentcolor)){.ap-pg .ap-mv{--ap-ground:light-dark(var(--cr),var(--page));--ap-hall:light-dark(var(--sheet),var(--tile))}}
-.ap-pg .ap-mw.zoomed .ap-mv{box-shadow:inset 0 0 0 2px var(--eb)}
-/* Zoomed, the map keeps every drag; Done gives the page its swipes back. */
-.ap-pg .ap-done{position:absolute;top:12px;right:12px;z-index:4;display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 18px;
-  border-radius:22px;background:var(--ink);color:var(--page);font-size:15px;font-weight:800;box-shadow:0 2px 8px var(--gh);cursor:pointer}
-.ap-pg .ap-done[hidden]{display:none}
-.ap-pg .ap-zc{position:absolute;right:12px;bottom:12px;z-index:4;display:flex;gap:8px;padding:0 4px;border-radius:26px;background:var(--sheet);box-shadow:0 2px 8px var(--gh)}
-.ap-pg .ap-z{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;color:var(--ink);font-size:20px;cursor:pointer}
-.ap-pg .ap-z[disabled]{opacity:.38;cursor:default}
-.ap-pg .ap-mv:active{cursor:grabbing}
-.ap-pg .ap-svg{display:block;width:100%;height:100%}
-.ap-pg .ap-svg .m-bg{fill:var(--ap-ground)}
-.ap-pg .ap-svg .m-area,.ap-pg .ap-svg .m-water{fill:var(--eb);fill-opacity:.13}
-.ap-pg .ap-svg .m-wall{fill:var(--ap-hall);stroke:var(--ap-edge);stroke-width:1;vector-effect:non-scaling-stroke}
-.ap-pg .ap-svg .m-wall.ap-open{fill:none;stroke:var(--ap-edge)}
-.ap-pg .ap-svg .m-gate{fill:var(--eb)}
-.ap-pg .ap-svg .m-sec{fill:var(--warn);fill-opacity:.24;stroke:var(--warn);stroke-width:1;vector-effect:non-scaling-stroke}
-.ap-pg .ap-svg .m-food{fill:var(--s3)}
-.ap-pg .ap-svg text{display:none}
-.ap-pg .ap-svg .m-route{display:none;fill:none;stroke:var(--eb);stroke-width:3;stroke-dasharray:6 5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-/* The map's own drawn routes: only the one that fits this visit, and only when there is no walk of yours. */
-.ap-pg .ap-mv[data-role="depart"]:not(.has-rt) #route-depart,
-.ap-pg .ap-mv[data-role="arrive"]:not(.has-rt) #route-arrive,
-.ap-pg .ap-mv[data-role="arrive"] #route-taxi,.ap-pg .ap-mv[data-role="arrive"] #route-bus,.ap-pg .ap-mv[data-role="arrive"] #route-ride{display:inline}
-.ap-pg .ap-svg .m-you{fill:var(--ink)}
-.ap-pg .ap-rc{fill:none;stroke:var(--sheet);stroke-width:10;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
-.ap-pg .ap-rt{fill:none;stroke:var(--ink);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:12 8;
-  vector-effect:non-scaling-stroke;animation:ap-march 1.2s linear infinite}
-@keyframes ap-march{to{stroke-dashoffset:-20}}
-@media (prefers-reduced-motion:reduce){.ap-pg .ap-rt{animation:none}}
+/* ---------- head: visit switch and what stops you ---------- */
+.ap-pg .ap-head:empty{display:none}
+.ap-pg .ap-head{margin-bottom:14px}
+.ap-pg .ap-head>.ap-seg:last-child{margin-bottom:0}
+.ap-pg .ap-head .ap-cos{margin-top:0}
 
-/* pins (HTML overlay so text stays sharp and readable at every zoom) */
-.ap-pg .ap-pins{position:absolute;inset:0;pointer-events:none}
-.ap-pg .ap-pin{position:absolute;left:0;top:0;width:0;height:0}
-.ap-pg .ap-pi{position:absolute;left:0;top:0;display:flex;align-items:center;white-space:nowrap;transform:translateY(-50%)}
-.ap-pg .ap-pl{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;line-height:1;border-radius:9px;padding:5px 8px}
-.ap-pg .ap-you{z-index:3}
-.ap-pg .ap-you .ap-pi{left:-10px}
-.ap-pg .ap-you .ap-pl{margin-left:6px;background:var(--ink);color:var(--page);box-shadow:0 2px 8px var(--gh)}
-.ap-pg .ap-you.fl .ap-pi{left:auto;right:-10px;flex-direction:row-reverse}
-.ap-pg .ap-you.fl .ap-pl{margin-left:0;margin-right:6px}
-.ap-pg .ap-you.dn .ap-pl,.ap-pg .ap-you.up .ap-pl{position:absolute;left:calc(10px + var(--dx,0px));margin:0}
-.ap-pg .ap-you.dn .ap-pl{top:calc(100% + 4px)}
-.ap-pg .ap-you.up .ap-pl{bottom:calc(100% + 4px)}
-.ap-pg .ap-dot{position:relative;width:20px;height:20px;border-radius:50%;background:var(--ink);box-shadow:0 0 0 3px var(--sheet),0 2px 8px var(--gh);flex:none}
-.ap-pg .ap-you.you .ap-dot::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--ink);animation:ap-pulse 1.8s cubic-bezier(.2,.6,.4,1) infinite}
-/* The gate a link asked for pulses wider so it is the first thing you see. */
-.ap-pg .ap-you.q .ap-dot::after{animation-duration:1.4s}
-@media (prefers-reduced-motion:reduce){.ap-pg .ap-you .ap-dot::after{animation:none;opacity:0}}
-/* The dot under your finger rings at once. */
-.ap-pg .ap-pin.hit .ap-dot,.ap-pg .ap-pin.hit .ap-pb{box-shadow:0 0 0 3px var(--sheet),0 0 0 6px var(--ink)}
-.ap-pg .ap-gn.hit .ap-pi{box-shadow:0 0 0 2px var(--sheet),0 0 0 4px var(--ink)}
-.ap-pg .ap-you.via .ap-dot{background:var(--eb);width:16px;height:16px;margin:0 2px}
-.ap-pg .ap-you.via .ap-pl{background:var(--sheet);color:var(--ink)}
-@keyframes ap-pulse{0%{transform:scale(1);opacity:.55}80%,100%{transform:scale(2.8);opacity:0}}
-.ap-pg .ap-poi{z-index:2}
-.ap-pg .ap-poi .ap-pi{left:-13px}
-.ap-pg .ap-pb{width:26px;height:26px;border-radius:50%;background:var(--sheet);color:var(--eb);display:flex;align-items:center;justify-content:center;
-  font-size:15px;flex:none;box-shadow:0 0 0 1.5px var(--ln),0 1px 4px var(--gh)}
-.ap-pg .ap-poi.k-security .ap-pb{color:var(--warn)}
-.ap-pg .ap-poi.k-baggage .ap-pb,.ap-pg .ap-poi.k-taxi .ap-pb,.ap-pg .ap-poi.k-bus .ap-pb{color:var(--ink)}
-.ap-pg .ap-poi .ap-pl{display:none;margin-left:4px;background:var(--sheet);color:var(--ink);box-shadow:0 1px 4px var(--gh);
-  font-size:13px;font-weight:700;letter-spacing:0;text-transform:none;padding:5px 8px}
-.ap-pg .ap-poi.lb .ap-pl{display:block}
-.ap-pg .ap-poi.fl .ap-pi{left:auto;right:-13px;flex-direction:row-reverse}
-.ap-pg .ap-poi.fl .ap-pl{margin-left:0;margin-right:4px}
-.ap-pg .ap-gn{z-index:1}
-.ap-pg .ap-gn .ap-pi{transform:translate(-50%,-50%);min-width:24px;justify-content:center;padding:3px 5px;border-radius:8px;
-  background:var(--eb);color:var(--sheet);font-size:12px;font-weight:800;line-height:1}
-.ap-pg .ap-gn.al-s .ap-pi,.ap-pg .ap-lbl.al-s .ap-pi{transform:translate(0,-50%)}
-.ap-pg .ap-gn.al-e .ap-pi,.ap-pg .ap-lbl.al-e .ap-pi{transform:translate(-100%,-50%)}
-/* Words from the map itself (concourses, levels, carousel numbers), with a halo so they read over lines. */
-.ap-pg .ap-lbl{z-index:1}
-.ap-pg .ap-lbl .ap-pi{transform:translate(-50%,-50%);font-size:13px;font-weight:600;line-height:1.1;color:var(--mu);
-  text-shadow:0 0 2px var(--ap-ground),0 0 3px var(--ap-ground),0 0 5px var(--ap-ground)}
-.ap-pg .ap-lbl.bd .ap-pi{font-weight:800;color:var(--ink)}
-.ap-pg .ap-lbl.big .ap-pi{font-weight:800;color:var(--ink);font-size:14px;letter-spacing:.01em}
+/* ---------- the map card ---------- */
+/* Cream card: From and To on top, the map under it; tools float on the map. */
+.ap-pg .ap-mc{position:relative;border-radius:22px;background:var(--cr);overflow:hidden}
+.ap-pg .ap-ft{padding:8px}
+.ap-pg .ap-ft:empty{display:none}
+.ap-pg .ap-fts{display:flex;align-items:center;gap:6px}
+.ap-pg .ap-frs{position:relative;flex:1;min-width:0;border-radius:16px;background:var(--sheet)}
+/* A dotted line joins the two dots, like a route. */
+.ap-pg .ap-frs::before{content:'';position:absolute;left:19px;top:31px;bottom:31px;border-left:2px dotted var(--mu);opacity:.6}
+.ap-pg .ap-fr{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:6px 10px 6px 14px;color:var(--ink);text-align:left;min-width:0}
+.ap-pg .ap-fr+.ap-fr{box-shadow:inset 0 1px 0 var(--ln)}
+.ap-pg .ap-fr small{display:block;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);line-height:1.2}
+.ap-pg .ap-fr b{display:block;font-size:15px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-pg .ap-fr .ap-chev{font-size:18px}
+.ap-pg .ap-dot{position:relative;z-index:1;width:12px;height:12px;border-radius:50%;flex:none;box-sizing:border-box}
+.ap-pg .ap-dot.fr{border:3px solid var(--ink);background:var(--sheet)}
+.ap-pg .ap-dot.you{background:var(--eb);box-shadow:0 0 0 3px color-mix(in srgb,var(--eb) 28%,transparent)}
+.ap-pg .ap-dot.to{border-radius:3px;background:var(--ink)}
+.ap-pg .ap-sw{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;background:var(--sheet);color:var(--ink);flex:none}
+.ap-pg .ap-sw .i{font-size:20px}
+/* Arrivals: Hotel or Home, and how you leave. */
+/* Leaving an arrival airport: Hotel or Home and How, under the map. */
+.ap-pg .ap-exw{margin-top:12px;padding:12px 8px 10px;border-radius:22px;background:var(--cr)}
+.ap-pg .ap-exw:empty{display:none}
+.ap-pg .ap-ex{display:flex;flex-direction:column;gap:8px}
+.ap-pg .ap-exh{margin:0 6px 2px}
+.ap-pg .ap-xto{display:flex;width:100%;background:var(--sheet)}
+.ap-pg .ap-xto button{flex:1;height:44px;border-radius:20px;justify-content:center;font-size:14px}
+.ap-pg .ap-xto .i{font-size:18px}
+.ap-pg .ap-how{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.ap-pg .ap-hw{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:56px;padding:4px 2px;border-radius:14px;
+  background:var(--sheet);color:var(--ink);font-size:13px;font-weight:700;text-align:center;min-width:0}
+.ap-pg .ap-hw span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-pg .ap-hw .i{font-size:20px;color:var(--eb)}
+.ap-pg .ap-hw[aria-pressed="true"]{background:var(--ink);color:var(--page)}
+.ap-pg .ap-hw[aria-pressed="true"] .i{color:var(--page)}
+.ap-pg .ap-eta{display:flex;align-items:center;gap:6px;margin:0 4px;font-size:13px;font-weight:600;line-height:1.35;color:var(--ink)}
+.ap-pg .ap-eta .i{font-size:16px;color:var(--eb);flex:none}
 
-/* tools under the map */
-.ap-pg .ap-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}
+/* The map and what floats on it. The overlay lets touches through except on its controls. */
+.ap-pg .ap-mw{position:relative;height:clamp(300px,54vh,560px);background:var(--page)}
+.ap-pg .ap-mh{position:absolute;inset:0}
+/* Floating controls: a hairline and a short shadow (a long one would be cut off by the chip row's scroll box). */
+.ap-pg .ap-mc{--ap-fl:0 0 0 1px var(--ln),0 2px 6px var(--ln)}
+.ap-pg .ap-mo{position:absolute;inset:0;z-index:6;pointer-events:none}
+.ap-pg .ap-mo>*{pointer-events:auto}
+.ap-pg .ap-mo>.ap-chips{pointer-events:none}
+.ap-pg .ap-chips>*{pointer-events:auto}
+.ap-pg .ap-chips{position:absolute;left:0;right:0;top:0;display:flex;gap:6px;padding:8px 24px 12px 8px;overflow-x:auto;scrollbar-width:none}
+.ap-pg .ap-chips::-webkit-scrollbar{display:none}
+/* A chip cut by the edge fades out, so the row reads as one you can scroll. */
+.ap-pg .ap-chips{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent)}
+.ap-pg .ap-ch{height:44px;padding:0 13px 0 11px;border-radius:22px;flex:none;font-size:14px;font-weight:700;background:var(--sheet);color:var(--ink);
+  box-shadow:var(--ap-fl)}
+.ap-pg .ap-ch .i{font-size:18px;color:var(--eb)}
+.ap-pg .ap-ch[aria-pressed="true"]{background:var(--ink);color:var(--page)}
+.ap-pg .ap-ch[aria-pressed="true"] .i{color:var(--page)}
+.ap-pg .ap-tl{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;background:var(--sheet);color:var(--ink);
+  box-shadow:var(--ap-fl)}
+.ap-pg .ap-tl .i{font-size:21px}
+.ap-pg .ap-tools2{position:absolute;right:8px;bottom:28px;display:flex;flex-direction:column;gap:8px}
+/* Full screen, where I am and the whole route stack bottom right, in thumb reach; the chips get the full width. */
+/* Floors, top first, like a lift panel; a dot marks the ones your route uses. */
+.ap-pg .ap-rl{position:absolute;right:8px;top:60px;display:flex;flex-direction:column;gap:2px;padding:3px;border-radius:25px;background:var(--sheet);
+  box-shadow:var(--ap-fl);max-height:calc(100% - 244px);overflow-y:auto;scrollbar-width:none}
+.ap-pg .ap-rl::-webkit-scrollbar{display:none}
+.ap-pg .ap-rl button{position:relative;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;flex:none;
+  font-size:15px;font-weight:800;color:var(--ink)}
+.ap-pg .ap-rl button[aria-pressed="true"]{background:var(--ink);color:var(--page)}
+.ap-pg .ap-rl i.on{position:absolute;right:8px;top:9px;width:6px;height:6px;border-radius:50%;background:var(--eb)}
+.ap-pg .ap-rl button[aria-pressed="true"] i.on{background:var(--page)}
+/* A tapped place: what it is and Route here. */
+.ap-pg .ap-pop{position:absolute;left:8px;right:60px;bottom:28px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:4px 10px;
+  padding:8px 4px 8px 10px;border-radius:18px;background:var(--sheet);color:var(--ink);box-shadow:var(--ap-fl)}
+.ap-pg .ap-pop .ic{width:36px;height:36px;border-radius:12px}
+.ap-pg .ap-pop .ic .i{font-size:18px}
+.ap-pg .ap-pop b{display:block;font-size:15px;font-weight:800;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-pg .ap-pop small{display:block;font-size:13px;color:var(--mu);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-pg .ap-pgo{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;margin-right:6px;border-radius:22px;
+  background:var(--ink);color:var(--page);font-size:14px;font-weight:700}
+.ap-pg .ap-pgo .i{font-size:18px}
+.ap-pg .ap-px{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;color:var(--mu)}
+.ap-pg .ap-px .i{font-size:20px}
+.ap-pg .ap-ml2{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:22px;
+  background:var(--sheet);color:var(--ink);font-size:14px;font-weight:700;white-space:nowrap;box-shadow:0 0 0 1px var(--ln)}
+.ap-pg .ap-sp{width:16px;height:16px;border-radius:50%;border:2px solid var(--ln);border-top-color:var(--eb);animation:ap-spin .8s linear infinite;flex:none}
+@keyframes ap-spin{to{transform:rotate(360deg)}}
+/* No map on this phone: the card holds the way out (on an arrival) and a note. */
+.ap-pg .ap-mc.none{padding:8px}
+.ap-pg .ap-mc.none .ap-ft{padding:0 0 8px}
+.ap-pg .ap-mc.none .ap-mw{height:auto;background:none}
+.ap-pg .ap-mc.none .ap-mh{display:none}
+.ap-pg .ap-mc.none .ap-mo{position:static}
+.ap-pg .ap-mc.none .ap-nomap{background:var(--sheet)}
+
+/* Full screen: the card covers the page under the top bar; the tab bar steps aside. */
+.ap-pg .ap-mc.full{position:fixed;z-index:3;left:0;right:0;bottom:0;top:calc(56px + env(safe-area-inset-top,0px) + var(--ap-strip,0px));
+  border-radius:0;margin:0}
+.ap-pg .ap-mc.full .ap-ft{display:none}
+.ap-pg .ap-mc.full .ap-mw{position:absolute;inset:0;height:auto}
+.ap-pg .ap-mc.full .ap-tools2,.ap-pg .ap-mc.full .ap-pop{bottom:calc(28px + env(safe-area-inset-bottom,0px))}
+#view.ap-mapfull{overflow:hidden!important}
+#view.ap-mapfull::after{opacity:0}
+#app.ap-mapfull .nv{transform:translateY(calc(100% + 40px + env(safe-area-inset-bottom,0px)));opacity:0;pointer-events:none}
+
+/* ---------- the route, step by step ---------- */
+.ap-pg .ap-rt{font-size:14px;font-weight:800;color:var(--ink);white-space:nowrap}
+.ap-pg .ap-rs{list-style:none;margin:0;padding:0}
+.ap-pg .ap-rr{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:6px 0;color:var(--ink);text-align:left;min-width:0}
+.ap-pg .ap-rs li+li .ap-rr{box-shadow:inset 0 1px 0 var(--ln)}
+.ap-pg .ap-ri{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--cr);color:var(--eb);flex:none}
+.ap-pg .ap-ri .i{font-size:19px}
+.ap-pg .ap-rr b{display:block;font-size:15px;font-weight:700;line-height:1.3}
+.ap-pg .ap-rr small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
+.ap-pg .ap-rs li:last-child .ap-ri{background:var(--eb);color:var(--sheet)}
+.ap-pg .ap-rn{margin:10px 0 0;font-size:13px;color:var(--mu);line-height:1.4}
+.ap-pg .ap-sh+.ap-rn{margin-top:0}
+.ap-pg .ap-rn b{color:var(--ink)}
+/* No route yet: a cream card that says what it waits on (like the no-map card). */
+.ap-pg .ap-re{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:20px;background:var(--cr);color:var(--ink);font-size:14px;font-weight:500;line-height:1.4}
+.ap-pg .ap-re>.i{font-size:22px;color:var(--eb);flex:none;margin-top:-1px}
+.ap-pg .ap-re b{font-weight:800}
+
+/* ---------- along the route ---------- */
+.ap-pg .ap-als{display:flex;flex-direction:column}
+.ap-pg .ap-al{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:8px 0;color:var(--ink);text-align:left;min-width:0}
+.ap-pg .ap-als>*+*{box-shadow:inset 0 1px 0 var(--ln)}
+.ap-pg .ap-al b{display:block;font-size:15px;font-weight:800;line-height:1.3}
+.ap-pg .ap-al small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
+
+/* ---------- From / To picker (a sheet on body) ---------- */
+.ap-pk{position:fixed;inset:0;z-index:15;display:flex;flex-direction:column;justify-content:flex-end}
+.ap-pk [hidden]{display:none!important}
+.ap-pk .ap-pkb{position:absolute;inset:0;background:color-mix(in srgb,var(--robt) 48%,transparent);cursor:default;animation:ap-fade .2s ease-out}
+.ap-pk .ap-pks{position:relative;display:flex;flex-direction:column;max-height:82vh;max-height:82dvh;border-radius:28px 28px 0 0;background:var(--sheet);color:var(--ink);
+  padding:6px max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));outline:none;animation:ap-up .32s var(--ease)}
+.ap-pk .ap-pkh{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px}
+.ap-pk .ap-pkh b{font-size:20px;font-weight:800}
+.ap-pk .ap-pkx{display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin-right:-8px;border-radius:22px;color:var(--ink)}
+.ap-pk .ap-pkx .i{font-size:22px}
+.ap-pk .ap-pkq{display:flex;align-items:center;gap:8px;height:48px;padding:0 14px;border-radius:16px;background:var(--cr);color:var(--mu)}
+.ap-pk .ap-pkq .i{font-size:18px;flex:none}
+/* 16px keeps iOS from zooming the page on focus. */
+.ap-pk .ap-pkq input{flex:1;min-width:0;height:100%;border:0;background:none;color:var(--ink);font:600 16px/1.2 Inter,system-ui,sans-serif;outline:none;-webkit-appearance:none;appearance:none}
+.ap-pk .ap-pkq input::placeholder{color:var(--mu)}
+.ap-pk .ap-pkq:focus-within{box-shadow:inset 0 0 0 2px var(--eb)}
+.ap-pk .ap-pkl{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:4px 0 calc(20px + env(safe-area-inset-bottom,0px))}
+.ap-pk .ap-pkg{padding-top:14px}
+.ap-pk .ap-pkg>.ey{margin-bottom:4px}
+.ap-pk .ap-po{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:6px 0;color:var(--ink);text-align:left;min-width:0}
+.ap-pk .ap-po+.ap-po{box-shadow:inset 0 1px 0 var(--ln)}
+.ap-pk .ap-po .ic{width:36px;height:36px;border-radius:12px}
+.ap-pk .ap-po .ic .i{font-size:18px}
+.ap-pk .ap-po b{display:block;font-size:15px;font-weight:700;line-height:1.3}
+.ap-pk .ap-po small{display:block;font-size:13px;color:var(--mu);margin-top:1px;line-height:1.3}
+.ap-pk .ap-po[aria-current="true"] b{font-weight:800}
+.ap-pk .ap-pkc{font-size:20px;color:var(--eb);flex:none}
+.ap-pk .ap-gg{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;margin-top:4px}
+.ap-pk .ap-gb{display:flex;align-items:center;justify-content:center;height:44px;border-radius:14px;background:var(--cr);color:var(--ink);font-size:15px;font-weight:700}
+.ap-pk .ap-gb.mine{box-shadow:inset 0 0 0 2px var(--eb);color:var(--eb);font-weight:800}
+.ap-pk .ap-gb[aria-current="true"]{background:var(--ink);color:var(--page);box-shadow:none}
+.ap-pk .ap-pke{margin:18px 0 0;font-size:14px;color:var(--mu);text-align:center}
+@keyframes ap-up{from{transform:translateY(100%)}to{transform:none}}
+@keyframes ap-fade{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .ap-pk .ap-pkb,.ap-pk .ap-pks{animation:none}
+  .ap-pg .ap-sp{animation:none;border-top-color:var(--ln)}
+}
+
+/* ---------- buttons under a step ---------- */
 .ap-pg .ap-tb{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:44px;min-width:44px;border-radius:22px;
   background:var(--cr);color:var(--ink);font-size:14px;font-weight:700;flex:none;transition:opacity .2s}
 .ap-pg .ap-tb .i{font-size:20px}
-.ap-pg .ap-gt{padding:0 16px 0 13px;background:var(--ink);color:var(--page);min-width:0;flex:0 1 auto}
-.ap-pg .ap-gt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ap-pg .ap-wk{padding:0 16px 0 13px;text-decoration:none;min-width:0;flex:0 1 auto}
 .ap-pg .ap-wk span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ap-pg .ap-tb[disabled]{opacity:.38;cursor:default}
-.ap-pg .ap-cap{margin:10px 2px 0;font-size:13px;color:var(--mu);min-height:18px}
-.ap-pg .ap-key{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:13px;color:var(--mu);font-weight:600}
-.ap-pg .ap-key span{display:inline-flex;align-items:center;gap:6px}
-.ap-pg .ap-k{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none}
-.ap-pg .ap-k.you{background:var(--ink)}
-.ap-pg .ap-k.rt{width:16px;height:4px;border-radius:2px;background:var(--ink)}
-.ap-pg .ap-k.gt{width:8px;height:8px;background:var(--eb)}
-.ap-pg .ap-k.sc{position:relative;border-radius:2px;box-shadow:inset 0 0 0 1.5px var(--warn)}
-.ap-pg .ap-k.sc::before{content:'';position:absolute;inset:0;border-radius:2px;background:var(--warn);opacity:.3}
-.ap-pg .ap-k.wk{width:16px;height:0;border-radius:0;border-top:3px dashed var(--eb)}
-.ap-pg .ap-k.fd{width:8px;height:8px;background:var(--s3)}
-.ap-pg .ap-notes{margin:12px 0 0;padding:0 0 0 18px;font-size:13px;line-height:1.45;color:var(--ink)}
-.ap-pg .ap-notes li+li{margin-top:4px}
-.ap-pg .ap-src{display:flex;gap:8px;align-items:flex-start;margin:10px 0 0;font-size:13px;color:var(--mu);line-height:1.4}
-.ap-pg .ap-src .i{font-size:16px;margin-top:1px}
 .ap-pg .ap-nomap{display:flex;gap:12px;align-items:flex-start;padding:14px;border-radius:20px;background:var(--cr)}
 .ap-pg .ap-nomap>.i{font-size:24px;color:var(--eb);margin-top:2px}
 .ap-pg .ap-nomap b{display:block;font-size:15px;font-weight:800}
