@@ -24,8 +24,9 @@
 .wl .wl-ib[aria-disabled="true"]{opacity:.4;pointer-events:none}
 .wl .wl-card{background:var(--cr);border-radius:22px;padding:16px}
 .wl .wl-card .ic{background:var(--sheet)}
-.wl .wl-empty b{display:block;font-size:17px;font-weight:800}
-.wl .wl-empty p{margin:8px 0 0;font-size:14px;line-height:1.4;color:var(--mu)}
+.wl .wl-empty>b{display:block;font-size:17px;font-weight:800}
+.wl .wl-empty p{margin:var(--sp-2) 0 0;font-size:14px;line-height:1.4;color:var(--mu)}
+.wl .wl-empty p b{font-weight:700;color:var(--ink)}
 .wl .wl-rows{padding:6px 16px}
 .wl .wl-rows>.wl-r{padding:10px 0}
 .wl .wl-rows>.wl-r+.wl-r{border-top:1px solid var(--ln)}
@@ -52,7 +53,10 @@
 .wl .wl-up{text-transform:uppercase;letter-spacing:.08em;font-weight:700}
 .wl .wl-up::placeholder{text-transform:none;letter-spacing:0;font-weight:400}
 .wl .inp::placeholder{color:var(--mu);opacity:1}
-.wl .wl-link{display:flex;align-items:center;gap:8px;min-height:44px;margin-top:var(--sp-3);font-size:15px;font-weight:700;color:var(--eb)}
+/* Hugs its text, padded out past the column edge, so the pressed tint reads as a soft pill
+   around the link rather than a hard full-width band. */
+.wl .wl-link{display:flex;width:fit-content;align-items:center;gap:8px;min-height:44px;margin:var(--sp-3) calc(-1 * var(--sp-3)) 0;
+  padding:0 var(--sp-3);border-radius:var(--r-sm);font-size:15px;font-weight:700;color:var(--eb)}
 .wl .wl-link .i{font-size:18px}
 
 /* travelers */

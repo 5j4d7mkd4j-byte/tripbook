@@ -28,7 +28,7 @@ N.screen('unlock', {
             </label>
             <div id="unl-msg" class="err" role="alert" hidden></div>
             <button type="submit" class="btn" id="unl-go" style="width:100%">${icon('lock-open')}Open trip</button>
-            <div class="co plain">${icon('shield-check')}<span>Type it once on this phone. Anything you add to Wallet later stays on this phone.</span></div>
+            <div class="co plain">${icon('shield-check')}<span><b>Once per phone.</b> Type it here once. Anything you add to Wallet later stays on this phone.</span></div>
           </div>
         </form>`,
     };

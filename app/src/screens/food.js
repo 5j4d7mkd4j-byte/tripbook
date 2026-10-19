@@ -147,7 +147,8 @@ let V = null;                 // mounted view state
 let MV = null;                // map view state
 let SH = null;                // open filter sheet
 let R = null;                 // last computed results
-let memo = null;              // scroll and map position kept while a place is open
+let memo = null;              // map position kept while a place is open
+let lastY = 0;                // list scroll, kept across tabs and places; a re-tap of the tab still goes to the top
 let fromName = '';            // the screen we came from (from the hashchange)
 let locating = false, staggerNext = true, qT = 0;
 window.addEventListener('hashchange', ev => {
@@ -248,15 +249,15 @@ function stInfo(hr) {
     default: return {c: 'fd-unk', t: 'Hours not listed'};
   }
 }
-const stChip = m => { const s = stInfo(m.hr); return h`<span class="${'fd-oc ' + s.c}" data-fdst="${m.id}"><span class="fd-od"></span>${s.t}</span>`; };
-// "Deli · 0.4 mi · Open till 11p": what it is, how far (the neighbourhood until we know where you are), then
-// whether it's open, which drops to its own line rather than being cut short.
+const stChip = m => { const s = stInfo(m.hr); return h`<span class="${'fd-oc fd-hr ' + s.c}" data-fdst="${m.id}"><span class="fd-od"></span>${s.t}</span>`; };
+// "Deli · 0.4 mi", then "● Open till 11p" on a line of its own: what it is and how far (the neighbourhood until we
+// know where you are), with the hours always in the same place on every card rather than inline on some and wrapped on others.
 const miles = d => d < 160 ? `${Math.round(d / 0.3048 / 10) * 10} ft` : `${(d / 1609.34).toFixed(1)} mi`;
 function metaHtml(m) {
   const far = m.d != null && !(R && R.far) ? miles(m.d) : '';
   const at = far || m.hood || m.boro;
   const what = [m.cuisine[0], at].filter(Boolean).join(' · ');
-  return h`<span class="fd-meta">${what ? h`<span class="fd-mw">${what}</span>` : ''}${stChip(m)}</span>`;
+  return h`${what ? h`<span class="fd-meta"><span class="fd-mw">${what}</span></span>` : ''}${stChip(m)}`;
 }
 // first photo with an id, food shots before inside ones; read here rather than through N.food.cover, which throws on a
 // null entry or a non-array list and would log an error for every card of one bad record
@@ -356,14 +357,15 @@ const searchRow = () => h`<div class="fd-srow">
   <button class="fd-fbtn" data-act="fdSheet" aria-haspopup="dialog" aria-label="${sheetCount() ? `Filters, ${sheetCount()} on` : 'Filters'}">${icon('adjustments-horizontal')}<span class="fd-fn" data-fdfn${sheetCount() ? '' : N.raw(' hidden')}>${sheetCount()}</span></button>
 </div>`;
 const qc = (act, arg, on, inner, off, label) => h`<button class="fd-qc" data-act="${act}" data-arg="${arg}" aria-pressed="${on ? 'true' : 'false'}"${off ? N.raw(' aria-disabled="true"') : ''}${label ? h` aria-label="${label}"` : ''}><span class="fd-qcp">${inner}</span></button>`;
+// The quick chips. One that would find nothing is left out unless it's on; with nothing matching,
+// only the ones that are on stay (to turn off) and the empty state offers the rest.
 function chipsHtml() {
   if (!R) compute();
-  const {base} = R;
+  const {base} = R, none = !R.list.length;
   const oBase = base.filter(m => pass(m, S, 'open'));
   const openN = oBase.filter(isOpen).length;
-  // nothing open: the chip would only be a dead end, so it goes until something opens (or it's already on)
-  const out = [openN || S.open ? qc('fdOpen', '', S.open, h`<span class="fd-od"></span>Open now<span class="fd-n">${openN}</span>`, false, `Open now, ${openN}`) : '',
-    qc('fdNear', '', S.sort === 'near', h`${icon('current-location')}${locating ? 'Locating…' : 'Near me'}`, false)];
+  const out = [(openN && !none) || S.open ? qc('fdOpen', '', S.open, h`<span class="fd-od"></span>Open now<span class="fd-n">${openN}</span>`, false, `Open now, ${openN}`) : '',
+    none ? '' : qc('fdNear', '', S.sort === 'near', h`${icon('current-location')}${locating ? 'Locating…' : 'Near me'}`, false)];
   const tBase = base.filter(m => pass(m, S, 'types'));
   const seen = new Map();
   for (const m of R.M) for (const t of m.types) if (!NOT_CHIPS.has(t)) seen.set(t, (seen.get(t) || 0) + 1);
@@ -372,11 +374,13 @@ function chipsHtml() {
     const on = S.types.includes(t);
     const need = on ? S.types : [...S.types, t];
     const n = tBase.filter(m => need.every(x => m.types.includes(x))).length;
+    if (!on && (!n || none)) continue;
     const [l, i] = typeInfo(t);
-    out.push(qc('fdType', t, on, h`${icon(i)}${l}<span class="fd-n">${n}</span>`, !n && !on, `${l}, ${n}`));
+    out.push(qc('fdType', t, on, h`${icon(i)}${l}<span class="fd-n">${n}</span>`, false, `${l}, ${n}`));
   }
-  return out;
+  return out.filter(Boolean);
 }
+const chipRow = () => { const c = chipsHtml(); return h`<div class="fd-chips" data-hscroll data-fdchips${c.length ? '' : N.raw(' hidden')}>${c}</div>`; };
 const barHtml = () => h`<div class="seg fd-seg" role="group" aria-label="View">
     <button data-act="fdView" data-arg="list" aria-pressed="${S.view === 'list' ? 'true' : 'false'}">${icon('layout-list')}List</button>
     <button data-act="fdView" data-arg="map" aria-pressed="${S.view === 'map' ? 'true' : 'false'}">${icon('map-2')}Map</button>
@@ -449,7 +453,7 @@ function resultsHtml(stagger = false) {
   const filtered = list.length !== M.length || anyFilter() || !!Q.trim();
   const head = h`<div class="fd-rh">
     <p class="fd-cnt" role="status">${filtered ? h`<b>${list.length}</b> of ${N.plural(M.length, 'spot')}` : h`<b>${M.length}</b> ${M.length === 1 ? 'spot' : 'spots'}`}</p>
-    ${filtered ? h`<button class="fd-lnk" data-act="fdClearAll">Clear all</button>` : ''}
+    ${filtered && list.length ? h`<button class="fd-lnk" data-act="fdClearAll">Clear all</button>` : ''}
   </div>
   ${act.length ? h`<div class="fd-acs" data-hscroll>${act.map(([g, v, l]) => h`<button class="fd-ac" data-act="fdDrop" data-arg="${g + '|' + v}" aria-label="${`Remove ${l}`}"><span>${l}${icon('x')}</span></button>`)}</div>` : ''}
   ${noteHtml()}`;
@@ -465,8 +469,7 @@ function resultsHtml(stagger = false) {
 function footHtml() {
   const d = N.data.food || {};
   const at = typeof d.collected_at === 'string' ? new Date(d.collected_at) : null;   // a stored timestamp, not "now"
-  const t = at && Number.isFinite(at.getTime())
-    ? safe(() => new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric'}).format(at), '') : '';
+  const t = at && Number.isFinite(at.getTime()) ? safe(() => N.date(d.collected_at, 'NYC'), '') : '';
   return h`<p class="fd-foot">${t ? `List saved from Yelp on ${t}. ` : ''}Hours can change, so check before a long trip across town.</p>`;
 }
 function bodyHtml(stagger = false) {
@@ -474,7 +477,7 @@ function bodyHtml(stagger = false) {
   if (S.view === 'map') return h`<div class="fd-mapph" aria-hidden="true"></div>`;
   return h`<div class="fd">
     ${searchRow()}
-    <div class="fd-chips" data-hscroll data-fdchips>${chipsHtml()}</div>
+    ${chipRow()}
     <div class="fd-bar" data-fdbar>${barHtml()}</div>
     <div data-fdres>${resultsHtml(stagger)}</div>
   </div>`;
@@ -484,8 +487,8 @@ function bodyHtml(stagger = false) {
 const $v = s => V && V.view ? N.$(s, V.view) : null;
 const $$v = s => V && V.view ? N.$$(s, V.view) : [];
 function paintControls() {
-  const ch = String(h`${chipsHtml()}`);
-  $$v('[data-fdchips]').forEach(e => { const x = e.scrollLeft; e.innerHTML = ch; e.scrollLeft = x; });
+  const c = chipsHtml(), ch = String(h`${c}`);
+  $$v('[data-fdchips]').forEach(e => { const x = e.scrollLeft; e.innerHTML = ch; e.hidden = !c.length; e.scrollLeft = x; });
   const bar = $v('[data-fdbar]');
   if (bar) bar.innerHTML = String(barHtml());
   const n = sheetCount();
@@ -776,7 +779,7 @@ const roadW = (base, z) => Math.max(.4, Math.min(base * 2 ** (z - 15), base * 3)
 function mapShell() {
   return h`<div class="fd-mapc" role="region" aria-label="Map of saved spots"></div>
     <div class="fd-mload" data-fdmload>${icon('map-2')}<span>Loading map…</span></div>
-    <div class="fd-mtop">${searchRow()}<div class="fd-chips" data-hscroll data-fdchips>${chipsHtml()}</div></div>
+    <div class="fd-mtop">${searchRow()}${chipRow()}</div>
     <div class="fd-mmsg" data-fdmmsg hidden></div>
     <div class="fd-mbot">
       <p class="fd-moff" data-fdmoff hidden></p>
@@ -786,7 +789,7 @@ function mapShell() {
           <button data-act="fdView" data-arg="map" aria-pressed="true">${icon('map-2')}Map</button>
         </div>
         <span class="fd-mcount" data-fdmcount role="status"></span>
-        <button class="fd-mbtn" data-act="fdFit" aria-label="Show all results">${icon('arrows-maximize')}</button>
+        <button class="fd-mbtn" data-act="fdFit" aria-label="Show all results">${icon('zoom-reset')}</button>
         <button class="fd-mbtn" data-act="fdLocate" data-arg="pan" aria-label="Show where I am">${icon('current-location')}</button>
       </div>
       <div class="fd-pw" data-fdprev hidden></div>
@@ -1261,9 +1264,8 @@ N.screen('food', {
     V.offs.push(N.on('where', () => refresh()));
     V.offs.push(N.on('net', () => { if (V && !hasData()) paintBody(); }));
     if (N.whereOk && N.whereOk() && N.where) N.where().then(w => { if (w && V) refresh(); }).catch(() => {});
-    const back = fromName === 'place' && memo;
     if (S.view === 'map' && hasData()) openMap();
-    else if (back && memo.scroll) { const y = memo.scroll; requestAnimationFrame(() => { if (V) view.scrollTop = y; }); }
+    else if (lastY) { const y = lastY; requestAnimationFrame(() => { if (V) view.scrollTop = y; }); }
     if (!MV) memo = null;
     requestAnimationFrame(() => { if (V) { safe(revealChips); safe(fitBadges); } });
     // tags are fitted to the line, so a rotation or the web font arriving fits them again
@@ -1275,12 +1277,13 @@ N.screen('food', {
     return () => {
       closeSheet(true);
       const to = safe(() => N.route().name, '');
-      memo = to === 'place' ? {scroll: view.scrollTop, map: MV && MV.map ? {c: MV.map.getCenter(), z: MV.map.getZoom(), sel: MV.sel} : null} : null;
+      lastY = view.scrollTop;
+      memo = to === 'place' ? {map: MV && MV.map ? {c: MV.map.getCenter(), z: MV.map.getZoom(), sel: MV.sel} : null} : null;
       closeMap();
       clearTimeout(qT);
       if (V) V.offs.forEach(f => { try { f(); } catch { /* gone */ } });
       V = null;
-      staggerNext = to !== 'place';
+      staggerNext = to !== 'place' && !lastY;   // cards rise in only when the list opens at its top
     };
   },
   update(ctx, why) {

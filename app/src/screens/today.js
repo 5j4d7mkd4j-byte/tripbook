@@ -20,7 +20,7 @@ const WX_ICONS = new Set(['cloud-storm', 'snowflake', 'cloud', 'cloud-rain', 'cl
 const sec = fn => { try { return fn() || ''; } catch (e) { N.report(e, 'today'); return ''; } };
 const city = c => CITY[c] || (N.guideFor(c) || {}).city || c || '';
 const port = c => PORT[c] || (N.guideFor(c) || {}).short || c || '';
-const fno = l => l ? `${l.carrier || 'AA'} ${l.num || String(l.flight || '').replace(/^\D+/, '')}`.trim() : '';
+const fno = l => l ? `${l.carrier || 'AA'}\u00a0${l.num || String(l.flight || '').replace(/^\D+/, '')}`.trim() : '';
 const tzAbbr = (ap, iso) => {
   try {
     const p = new Intl.DateTimeFormat('en-US', {timeZone: N.tz(ap), timeZoneName: 'short'}).formatToParts(iso ? new Date(iso) : N.now());
@@ -36,9 +36,12 @@ const longDate = ap => N.date(N.now(), ap, true);
 const dateOf = ymd => ymd ? N.date(ymd + 'T16:00:00Z', 'NYC') : '';
 const legDate = l => l.dep.time ? N.date(l.dep.time, l.from) : dateOf(l.date);
 const dayDiff = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
+// Guide prose keeps "15–30 min", "25 min" and "Level 3" whole when it wraps.
+const glue = s => String(s).replace(/(\d)–(\d)/g, '$1\u2060–\u2060$2').replace(/(\d) (min|ft|h|hours?|minutes?)\b/g, '$1\u00a0$2')
+  .replace(/\b(Level|Terminal|Checkpoint|Gate|Concourse) ([A-Z]?\d*[A-Z]?)\b/g, (m, a, b) => b ? `${a}\u00a0${b}` : m);
 const sentences = (s, n = 2) => {
   const m = String(s || '').match(/[^.!?]+[.!?]+(?=\s|$)/g);
-  return (m ? m.slice(0, n).join('') : String(s || '')).trim();
+  return glue((m ? m.slice(0, n).join('') : String(s || '')).trim());
 };
 const dropFirst = s => { const m = String(s || '').match(/[^.!?]+[.!?]+(?=\s|$)/g); return m && m.length > 1 ? m.slice(1).join('').trim() : String(s || '').trim(); };
 // First clause of a sentence: "A is open 24 hours; B opens at 4a." → "A is open 24 hours."
@@ -63,6 +66,19 @@ const meta = parts => { parts = parts.filter(Boolean); return parts.length ? h`<
 const subLine = (parts, dot) => h`<div class="sub td-st">${dot || ''}${meta(parts)}</div>`;
 // "5 min ago", kept current by core's ticker. Relative, so it reads the same in every time zone.
 const ago = iso => h`<span data-ago="${iso}">${N.ago(iso)}</span>`;
+// "1h 15m" / "35 min" that never breaks between number and unit.
+const dur = m => N.dur(m).replace(/ /g, '\u00a0');
+// "PHX → CLT" and "5:00a → 7:12a" with a drawn arrow; screen readers hear "to".
+const arw = () => h`<span class="sr">to </span>${icon('arrow-right', 'td-arw')}`;
+const pair = (a, b) => h`<span class="nw">${a} ${arw()} ${b}</span>`;
+const range = (a, b) => h`<span class="nw">${a}</span> ${arw()} <span class="nw">${b}</span>`;
+// Core's refresh strip is up (offline, or old data in the travel window): it is the one freshness line.
+const stripOn = () => { const f = N.fresh(); return (typeof N.unlocked !== 'function' || N.unlocked())
+  && (!N.online() || (f.level === 'stale' && !!(f.window || f.hot))); };
+// Old data outside the travel window: no strip, so Today shows its own Refresh row instead.
+const staleOn = () => { const f = N.fresh(); return f.level === 'stale' && !(f.window || f.hot) && N.online(); };
+// The one phrase for a walk with a gate still missing, as on Connect: "until the gate posts".
+const posts = (ag, bg) => !ag && !bg ? 'until the gates post' : 'until the gate posts';
 
 // ---------- day and night ----------
 // Sunrise and sunset from the NOAA sunrise equation, good to a few minutes: enough to say
@@ -153,14 +169,21 @@ function leaveFor(dir) {
   const v = askTransit(N.leaveBy, 'lga');
   const at = v && typeof v === 'object' && !(v instanceof Date) ? v.at || v.leave : v;
   // Only a time that still leaves room to reach the airport is taken.
-  return okT(at) && T(at) < T(lv.arrive) ? {...lv, at: new Date(at).toISOString(), source: 'transit'} : lv;
+  const out = okT(at) && T(at) < T(lv.arrive) ? {...lv, at: new Date(at).toISOString()} : {...lv};
+  // That time is for a car. When Transit's pick is a train or bus that leaves earlier, Transit leads
+  // with the pick's time (while the car time is 20+ min off), so Today does too; the car time stays the deadline.
+  const p = transitPick('lga'), t = nowMs();
+  if (p && okT(p.leave) && T(p.leave) >= t && T(p.leave) < T(out.at) && T(out.at) - t > 20 * MIN) out.pick = {name: p.name, at: new Date(p.leave).toISOString()};
+  return out;
 }
+// The time the heading gives: the pick's on a train or bus, else the car's.
+const goAt = lv => lv.pick ? lv.pick.at : lv.at;
 // Transit's best route right now when Transit shares it (N.bestRoute): {id, name, mins, leave}.
 function transitPick(kind) {
   const r = askTransit(N.bestRoute, kind, N.now());
   return r && r.name ? r : null;
 }
-const minsText = m => Array.isArray(m) ? `${m[0]}–${m[1]} min` : Number.isFinite(+m) && m !== '' && m != null ? `${+m} min` : '';
+const minsText = m => Array.isArray(m) ? `${m[0]}–${m[1]}\u00a0min` : Number.isFinite(+m) && m !== '' && m != null ? `${+m}\u00a0min` : '';
 // The return leg landed long enough ago that baggage and landing lines are history.
 const homeLong = S => S.dir === 'ret' && S.mode === 'arrived' && nowMs() > T(S.leg.arr.time) + 90 * MIN;
 function checkin(dir) {
@@ -211,26 +234,33 @@ function dotTone(st) {
   return st.tone === 'neutral' ? 'neutral' : 'td-dok';
 }
 const dot = cls => h`<span class="${N.cls('dot', cls)}"></span>`;
+const tookOff = l => !!l && !!(l.departed || l.landed || l.dep.actual || l.arr.actual || ['air', 'landed'].includes(l.state));
+// N.legStatus, worded by Today's clock (eff): past departure with no takeoff on record reads
+// "Likely in the air", as the model says once the feed is 20 min behind; a fresh check made after
+// departure time that still has the plane at the gate reads "Not departed yet".
+function legSt(l) {
+  const st = N.legStatus(l);
+  if (!l || st.tone === 'bad' || st.tone === 'warn' || tookOff(l)) return st;
+  const e = eff(l);
+  if (e === 'air') return {text: 'Likely in the air', tone: 'neutral'};
+  if (e === 'boarding' && okT(l.dep.time) && nowMs() - T(l.dep.time) > 5 * MIN) return {text: 'Not departed yet', tone: 'warn'};
+  return st;
+}
 // "● On time · checked 5 min ago". The check time is relative, so it reads the same in any zone.
-// It turns rose only when it is old and the refresh strip isn't showing (the strip already says so).
+// No "checked" while the strip or the Refresh row already says it.
 function statusLine(l) {
-  const f = N.fresh();
-  const at = l && l.checked_at || f.at;
-  let st = N.legStatus(l);
-  // A check made after departure time that still has no takeoff should not read "On time".
-  if (l && st.tone === 'ok' && !['air', 'landed'].includes(l.state) && !l.departed && !l.landed && !(l.dep && l.dep.actual)
-    && okT(l.dep && l.dep.time) && T(at) > T(l.dep.time) && nowMs() - T(l.dep.time) > 5 * MIN) st = {text: 'Not departed yet', tone: 'warn'};
-  const old = f.level === 'stale' && N.online() && !(f.window || f.hot);
+  const at = l && l.checked_at || N.fresh().at;
+  const st = legSt(l);
   return subLine([
     h`<span data-k="st-${l ? l.id : 'x'}">${st.text}</span>`,
-    at ? h`<span class="${old ? 'td-old' : ''}">checked ${ago(at)}</span>` : 'not checked yet',
+    stripOn() || staleOn() ? '' : at ? h`checked ${ago(at)}` : 'not checked yet',
   ], dot(dotTone(st)));
 }
 // How the leave time was worked out. Plain text: the buffer lives in Settings, which the menu already reaches.
 const srcParts = lv => [
-  lv.source === 'transit' ? 'Leave time from Transit' : `Based on a ${lv.drive} min drive${lv.source === 'traffic' ? ' in current traffic' : ''}`,
-  lv.buffer ? `${lv.buffer} min extra` : '',
-  `${N.dur(lv.arriveBefore)} before departure`,
+  lv.pick ? `By ${lv.pick.name}` : `Based on a ${lv.drive}\u00a0min drive${lv.source === 'traffic' ? ' in current traffic' : ''}`,
+  lv.buffer ? `${lv.buffer}\u00a0min extra` : '',
+  `${dur(lv.arriveBefore)} before departure`,
 ];
 const ln = (ic, body) => body ? h`<div class="td-ln">${icon(ic)}<span>${body}</span></div>` : '';
 const stepLn = (st, n = 2, ic) => st ? ln(ic || st.icon || 'info-circle', h`<b>${String(st.title || '').replace(/\.$/, '')}.</b> ${sentences(st.detail, n)}`) : '';
@@ -246,7 +276,7 @@ const illFor = l => l.from === 'PHX' ? DESERT : (l.from === 'LGA' || l.to === 'L
 
 // One leg as a ticket card → #flight/<id>.
 function legCard(l) {
-  const time = l.dep.time ? `${tmz(l.dep.time, l.from)} → ${tmz(l.arr.time, l.to)}` : 'Times not confirmed';
+  const time = l.dep.time ? range(tmz(l.dep.time, l.from), tmz(l.arr.time, l.to)) : 'Times not confirmed';
   return h`<a class="card td-a td-tk" href="#flight/${l.id}">${illFor(l)}
     <div class="td-tkc">
       <div class="ey">${fno(l)} · ${legDate(l)}</div>
@@ -257,22 +287,22 @@ function legCard(l) {
 }
 // The same flight as one row, for the hour before leaving when the drive card leads.
 function legRow(l) {
-  const time = l.dep.time ? `${tmz(l.dep.time, l.from)} → ${tmz(l.arr.time, l.to)}` : 'Times not confirmed';
+  const time = l.dep.time ? range(tmz(l.dep.time, l.from), tmz(l.arr.time, l.to)) : 'Times not confirmed';
   return h`<a class="card line td-a td-line" href="#flight/${l.id}"><div class="td-row td-legr"><span class="ic">${icon('plane')}</span>
-    <span class="grow"><b>${fno(l)} · ${l.from} → ${l.to}</b><small class="tn" data-k="time-${l.id}">${time}</small>${statusLine(l)}</span>${icon('chevron-right', 'td-chev')}</div></a>`;
+    <span class="grow"><b>${fno(l)} · ${pair(l.from, l.to)}</b><small class="tn" data-k="time-${l.id}">${time}</small>${statusLine(l)}</span>${icon('chevron-right', 'td-chev')}</div></a>`;
 }
 // The whole outbound (or return) as one ticket → #flights.
 function tripCard(legs, label) {
   const a = legs[0], z = legs[legs.length - 1];
   const via = legs.slice(0, -1).map(l => l.to);
   const total = N.mins(a.dep.time, z.arr.time);
-  const time = a.dep.time && z.arr.time ? `${tmz(a.dep.time, a.from)} → ${tmz(z.arr.time, z.to)}` : 'Times not confirmed';
+  const time = a.dep.time && z.arr.time ? range(tmz(a.dep.time, a.from), tmz(z.arr.time, z.to)) : 'Times not confirmed';
   return h`<a class="card td-a td-tk" href="#flights">${SKYLINE}
     <div class="td-tkc">
       <div class="ey">${legDate(a)} · ${label}</div>
       <div class="dp td-tkdp">${a.from}<br>${z.to}</div>
       <div class="td-tkr"><span class="fab" aria-hidden="true">${icon('arrow-right')}</span>
-        <div class="grow"><div class="td-tkt tn">${time}</div><div class="td-tks">${via.length ? `via ${via.join(', ')}` : 'Nonstop'}${total != null ? ` · ${N.dur(total)}` : ''}</div></div></div>
+        <div class="grow"><div class="td-tkt tn">${time}</div><div class="td-tks">${via.length ? `via ${via.join(', ')}` : 'Nonstop'}${total != null ? ` · ${dur(total)}` : ''}</div></div></div>
     </div></a>`;
 }
 // Bags close / Boards / Doors close (or Departs) as three cells; the next deadline is ringed
@@ -289,7 +319,27 @@ function cutoffs(items, ring, risk = false) {
 // One line for security: "Checkpoint A, Level 3 NW · open 24h · PreCheck from 5a".
 // The checkpoint is the one the guide's security step sends you to, else one open all night.
 const COMPASS = {north: 'N', south: 'S', east: 'E', west: 'W'};
-function secLine(code, st) {
+// "5a" / "4:15p" → minutes after midnight; local minutes of a moment at an airport
+// (the trip's zones are whole hours off UTC, so UTC minutes are local minutes).
+const clockMin = m => (+m[1] % 12 + (/p/i.test(m[3]) ? 12 : 0)) * 60 + (+m[2] || 0);
+const dayMin = (iso, code) => N.hour(iso, code) * 60 + new Date(iso).getUTCMinutes();
+const caution = text => h`<span class="td-warn">${icon('alert-triangle')}${text}</span>`;
+// PreCheck as it applies at `at` (when you reach security): a lane that opens later, or has
+// closed, is a caution, never "PreCheck from 5a" for a flight whose doors close before 5a.
+function preCheck(pc, code, at) {
+  pc = String(pc || '');
+  if (/^yes\b/i.test(pc)) return 'PreCheck';
+  const o = pc.match(/^\s*(\d{1,2})(?::(\d\d))?\s*([ap])/i);
+  if (!o) return '';
+  const from = o[0].replace(/\s+/g, '').toLowerCase();
+  const c = pc.slice(o[0].length).match(/^\s*[–-]\s*(\d{1,2})(?::(\d\d))?\s*([ap])/i);
+  if (!okT(at)) return /closed/i.test(pc) ? caution('No PreCheck for this flight') : `PreCheck from ${from}`;
+  const m = dayMin(at, code), om = clockMin(o), cm = c ? clockMin(c) : null;
+  if (m < om) return caution(`No PreCheck before ${from}`);
+  if (cm != null && cm > om && m >= cm) return caution(`No PreCheck after ${c[0].replace(/^[\s–-]+/, '').replace(/\s+/g, '').toLowerCase()}`);
+  return `PreCheck from ${from}`;
+}
+function secLine(code, st, at) {
   const list = ((N.guideFor(code) || {}).security || []).filter(s => s && s.name);
   if (!list.length) return st ? ln('shield-check', sentences(st.detail, 1)) : '';
   const named = st && list.find(s => new RegExp(`\\b${String(s.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(`${st.title || ''} ${st.detail || ''}`));
@@ -302,9 +352,7 @@ function secLine(code, st) {
   const where = first && first.length <= 18 ? `${first}${cmp && !new RegExp(`\\b${cmp}\\b`).test(first) ? ` ${cmp}` : ''}` : '';
   const hrs = String(cp.hours || '');
   const open = /24\s*h/i.test(hrs) ? 'open 24h' : /^\s*\d/.test(hrs) ? `open ${hrs.trim().replace(/\.$/, '')}` : '';
-  const pc = String(cp.precheck || '');
-  const pre = /^yes\b/i.test(pc) ? 'PreCheck' : /^\s*\d{1,2}(:\d\d)?\s*[ap]/i.test(pc) ? `PreCheck from ${pc.trim().match(/^\d{1,2}(:\d\d)?\s*[ap]/i)[0].replace(/\s+/g, '').toLowerCase()}` : '';
-  return ln('shield-check', meta([`${cp.name}${where ? `, ${where}` : ''}`, open, pre]));
+  return ln('shield-check', meta([`${cp.name}${where ? `, ${where}` : ''}`, open, preCheck(cp.precheck, code, at)]));
 }
 // The sand card for the drive to the airport. On the travel morning the heading already
 // gives the leave time, so the card gives the arrival time and the cutoffs; the days
@@ -322,12 +370,16 @@ function planCard(S, phase) {
   let rows;
   if (phase === 'before') rows = [];
   else {
-    const tip = drive && dropFirst(drive.detail);
+    const tip = drive && dropFirst(drive.detail), byTr = /^by (transit|subway|train|bus)/i.test(tip || '');
+    // On the way back Transit times the train itself, so the guide's rule of thumb gives way to it:
+    // the car time sits under the pick's, as on Transit.
+    const alt = lv.pick ? ln('car', h`Or <b class="tn">${N.time(lv.at, ap)}</b> by car${lv.drive ? h` · <span class="nw">${lv.drive}\u00a0min drive</span>` : ''}`)
+      : tip && tip !== drive.detail && !(byTr && dir === 'ret' && typeof N.bestRoute === 'function') ? ln(byTr ? 'train' : 'car', glue(tip)) : '';
     rows = [
       ln('clock', cut),
-      leaving && tip && tip !== drive.detail ? ln(/^by (transit|subway|train|bus)/i.test(tip) ? 'train' : 'car', tip) : '',
+      leaving ? alt : '',
       !leaving && curb ? stepLn(curb, 1) : '',
-      sec(() => secLine(ap, secStep)),
+      sec(() => secLine(ap, secStep, new Date(Math.max(t, T(lv.arrive))).toISOString())),
     ].filter(Boolean);
   }
   const chip = phase === 'before' ? h`<span class="chip td-lv">${icon(dir === 'out' ? 'home' : 'building')}<span data-k="leave-${dir}">Leave ${N.time(lv.at, ap)}</span></span>` : '';
@@ -335,7 +387,7 @@ function planCard(S, phase) {
     <div class="${N.cls('td-planh', chip && 'td-planw')}"><div class="grow"><div class="ey">${eyeb}</div><div class="td-big tn">At ${termLabel(l)} by <span data-k="arrive-${dir}">${N.time(lv.arrive, ap)}</span></div></div>${chip}</div>
     ${phase === 'before' ? h`<p class="td-cut">${cut}</p>` : ''}
     ${rows.length ? h`<div class="td-rows">${rows}</div>` : ''}
-    ${phase !== 'before' && S.mode === 'leave' && T(lv.at) - t > 3 * HOUR ? h`<p class="td-cut">Leave in ${until(lv.at)}</p>` : ''}
+    ${phase !== 'before' && S.mode === 'leave' && T(goAt(lv)) - t > 3 * HOUR ? h`<p class="td-cut">Leave in ${until(goAt(lv))}</p>` : ''}
   </div>`;
 }
 // Big gate number with boarding and door times. The whole card opens the airport map.
@@ -346,7 +398,7 @@ function gateCard(l, opts = {}) {
   const gate = l.dep.gate, seats = l.seats || [];
   return h`<a class="card td-a td-gate" href="${gateHref(l.from, gate)}">
     <div class="td-gtop"><div class="grow">
-      <div class="ey">${fno(l)} · ${l.from} → ${l.to}</div>
+      <div class="ey">${fno(l)} · ${pair(l.from, l.to)}</div>
       <div class="td-glbl">${[termText(l.dep.terminal).replace(/^T(?=\d)/, 'Terminal '), gate ? 'Gate' : ''].filter(Boolean).join(' · ') || city(l.from)}</div>
     </div>
     ${seats.length ? h`<div class="td-seat"><small>${seats.length > 1 ? 'Seats' : 'Seat'}</small><b class="tn">${seats.join(' · ')}</b></div>` : ''}</div>
@@ -371,14 +423,14 @@ const levelOf = c => c && LEVEL_TXT[c.level] ? c.level : 'ok';
 const levelTxt = c => c.label || LEVEL_TXT[levelOf(c)] || c.text || '';
 // Minutes between reaching the gate and doors closing; Number.isFinite guards an older model.
 const spareOf = c => Number.isFinite(c.spare) ? c.spare : null;
-const spareTxt = c => { const s = spareOf(c); return s == null ? '' : s >= 0 ? `${s} min before doors close` : 'doors may close before you reach the gate'; };
+const spareTxt = c => { const s = spareOf(c); return s == null ? '' : s >= 0 ? `${s}\u00a0min before doors close` : 'doors may close before you reach the gate'; };
 function connTile(dir) {
   const c = N.connection(dir);
   if (!c) return null;
   const tone = {ok: '', tight: 'td-cau', risk: 'td-ring'}[levelOf(c)];
   // A delay can push the landing past the next departure: say that, never "-15 min".
   if (missed(c)) return h`<a class="td-mini td-a td-ring" href="#connect/${dir}"><div class="ey">${city(c.at)}</div><b>Lands after ${fno(c.b)} leaves</b><small>At risk · the AA app shows rebooking</small></a>`;
-  return h`<a class="${N.cls('td-mini td-a', tone)}" href="#connect/${dir}"><div class="ey">${city(c.at)}</div><b>${c.ground < 180 ? `${c.ground} min` : N.dur(c.ground)} to connect</b><small>${[levelTxt(c), spareTxt(c)].filter(Boolean).join(' · ')}</small></a>`;
+  return h`<a class="${N.cls('td-mini td-a', tone)}" href="#connect/${dir}"><div class="ey">${city(c.at)}</div><b>${dur(c.ground)} on the ground</b><small>${[levelTxt(c), spareTxt(c)].filter(Boolean).join(' · ')}</small></a>`;
 }
 // The first leg is due to land at or after the second one's departure.
 const missed = c => !!c && Number.isFinite(c.ground) && c.ground <= 0;
@@ -440,7 +492,7 @@ function legAlerts(legs) {
 }
 function delayCo(l) {
   if (!l || !(l.delay_dep > 14) || !l.dep.time) return '';
-  return h`<div class="co" role="status">${icon('clock')}<span><b>${fno(l)} now leaves ${N.time(l.dep.time, l.from)}, ${N.dur(l.delay_dep)} late.</b> Times here use the new departure. Delays can shrink, so keep to AA’s cutoffs.</span></div>`;
+  return h`<div class="co" role="status">${icon('clock')}<span><b>${fno(l)} now leaves ${N.time(l.dep.time, l.from)}, ${dur(l.delay_dep)} late.</b> Times here use the new departure. Delays can shrink, so keep to AA’s cutoffs.</span></div>`;
 }
 // Check-in reminder until the leave time (after that you're on the way), with a dismiss
 // that this phone remembers for that flight.
@@ -452,16 +504,19 @@ function checkinCo(dir, untilIso) {
   if (untilIso && nowMs() >= T(untilIso)) return '';
   return h`<div class="td-ci">${extRow(AA_TRIPS, 'ticket', 'Check-in is open', `${fno(c.leg)} · aa.com or the AA app`)}<button class="td-x" data-act="ciDismiss" data-arg="${dir}" aria-label="Dismiss check-in reminder">${icon('x')}</button></div>`;
 }
-function staleCo(ap) {
+// Old data outside the travel window, worded and tapped like core's strip (which is off then).
+// Days with no flight carry no risk, so it is plain, not rose.
+function staleCo() {
+  if (!staleOn()) return '';
   const f = N.fresh();
-  // While core's refresh strip is up (travel window or a hot leg) it says the same thing.
-  if (f.level !== 'stale' || f.window || f.hot || !N.online()) return '';
-  return h`<button class="co plain td-stale" data-act="refresh">${icon('refresh')}<span class="grow">${meta([f.at ? `Flight info last checked ${when(f.at, ap)}` : 'Flight info not checked yet', 'tap to check now'])}</span></button>`;
+  return h`<button class="co plain td-stale" data-act="refresh">${icon('refresh')}<span class="grow">${f.at ? h`Flight status checked ${ago(f.at)}` : 'Flight status not checked yet'}</span><b>${f.at ? 'Refresh' : 'Check now'}</b></button>`;
 }
+// Unconfirmed return times are a caution (amber icon, ink words); the hero line already says
+// "not confirmed", so this says what to do.
 function retFlag() {
   const legs = N.dirLegs('ret');
   if (!legs.length || !legs.some(l => l.confirmed === false && !l.dep.time)) return '';
-  return h`<a class="bn td-a td-flag" href="${AA_TRIPS}" target="_blank" rel="noopener" role="status">${icon('alert-triangle')}<div class="grow"><b>Return flights not confirmed yet — check AA Trips</b><span>${legs.map(fno).join(' and ')} have no confirmed times. Today will plan the trip to LGA once they do.</span></div>${icon('external-link', 'td-chev')}</a>`;
+  return h`<a class="bn neutral td-a td-flag" href="${AA_TRIPS}" target="_blank" rel="noopener" role="status">${icon('alert-triangle')}<div class="grow"><b>Check AA Trips for the return times</b><span>Today plans the trip to LGA once ${legs.map(fno).join(' and ')} have times.</span></div>${icon('external-link', 'td-chev')}</a>`;
 }
 
 // ---------- views ----------
@@ -479,7 +534,7 @@ function vBefore() {
     head(`${longDate(ap)} · ${city(ap)}`,
       a.dep.time ? h`Departs in<br><b>${until(a.dep.time)}.</b>` : h`Flying to<br><b>New York.</b>`,
       statusLine(a)),
-    sec(() => staleCo(ap)),
+    sec(staleCo),
     sec(changesBn),
     sec(() => legAlerts(legs)),
     sec(() => delayCo(a)),
@@ -489,8 +544,8 @@ function vBefore() {
     sec(() => lineCard([
       ci && !ci.open && h`<div class="td-row"><span class="ic">${icon('ticket')}</span><span class="grow"><b>Check-in opens ${when(ci.opens, ap)}</b><small>24 hours before · aa.com or the AA app</small></span></div>`,
       ret.length && (unconf
-        ? extRow(AA_TRIPS, 'plane', `Home ${dateOf(ret[0].date)}`, h`${ret[0].from} → ${ret[ret.length - 1].to} · <span class="td-warn">times not confirmed, check AA Trips</span>`)
-        : linkRow('#flights', 'plane', `Home ${legDate(ret[0])}`, `${ret[0].from} → ${ret[ret.length - 1].to}${ret[0].dep.time ? ` · leaves ${tmz(ret[0].dep.time, ret[0].from)}` : ''}`)),
+        ? extRow(AA_TRIPS, 'plane', `Home ${dateOf(ret[0].date)}`, meta([pair(ret[0].from, ret[ret.length - 1].to), caution('times not confirmed, check AA Trips')]))
+        : linkRow('#flights', 'plane', `Home ${legDate(ret[0])}`, meta([pair(ret[0].from, ret[ret.length - 1].to), ret[0].dep.time ? `leaves ${tmz(ret[0].dep.time, ret[0].from)}` : '']))),
     ])),
     sec(() => tiles([connTile('out'), wxTile(ap, a.dep.time)])),
   ];
@@ -518,20 +573,21 @@ function dayWord(l) {
 // Minutes past the leave time (0 before it).
 const lateBy = lv => Math.max(0, Math.floor((nowMs() - T(lv.at)) / MIN));
 // From two hours before leaving, the drive card leads and the flight shrinks to one row.
-const compact = S => !!S.lv && nowMs() >= T(S.lv.at) - 2 * HOUR;
+const compact = S => !!S.lv && nowMs() >= T(goAt(S.lv)) - 2 * HOUR;
 function vMorning(S) {
   const {lv, leg: l, dir} = S;
   const ap = l.from, t = nowMs();
   // The leave time is said once, here; the card below gives the arrival time and cutoffs.
   let hl, lead = '';
   if (S.mode === 'leave') {
-    hl = T(lv.at) - t > 3 * HOUR
-      ? h`Leave for ${termLabel(l)} at<br><b class="tn">${N.time(lv.at, ap)}.</b>`
-      : h`Leave <span class="tn" data-k="leave-${dir}">${N.time(lv.at, ap)}</span><br><b>in ${until(lv.at)}.</b>`;
+    const go = goAt(lv);
+    hl = T(go) - t > 3 * HOUR
+      ? h`Leave for ${termLabel(l)} at<br><b class="tn">${N.time(go, ap)}.</b>`
+      : h`Leave <span class="tn" data-k="leave-${dir}">${N.time(go, ap)}</span><br><b>in ${until(go)}.</b>`;
   } else if (S.mode === 'leavenow') {
     const late = lateBy(lv);
     hl = h`Leave for ${termLabel(l)}<br><b>now.</b>`;
-    lead = late >= 1 ? h`<span class="td-warn">${late} min late</span>` : `Leave by ${N.time(lv.at, ap)}`;
+    lead = late >= 1 ? caution(`${late}\u00a0min late`) : `Leave by ${N.time(lv.at, ap)}`;
   } else hl = h`Get to ${termLabel(l, true)}<br>by <b class="tn">${N.time(lv.arrive, ap)}.</b>`;
   const sub = subLine([lead, ...srcParts(lv)]);
   const ci = sec(() => checkinCo(dir, lv.at));
@@ -574,7 +630,7 @@ function vGate(S) {
   const before = t < T(l.board) - 10 * MIN;
   const bagAt = first ? N.addMin(l.dep.time, -N.AA.bagdrop) : null;
   const rows = first && before ? [
-    sec(() => secLine(ap, stepBy(ap, 'depart', 'shield-check', /security/i))),
+    sec(() => secLine(ap, stepBy(ap, 'depart', 'shield-check', /security/i), N.now().toISOString())),
     sec(() => { const s = stepBy(ap, 'depart', 'walk'); return s ? stepLn(s, 1) : ''; }),
     sec(() => { const s = stepBy(ap, 'depart', 'coffee'); return s ? stepLn({...s, detail: clause(s.detail)}, 1) : ''; }),
   ].filter(Boolean) : [];
@@ -598,9 +654,9 @@ function vAir(S) {
   const l = S.leg, dir = S.dir, next = S.legs[S.idx + 1];
   const ap = l.to;
   return [
-    head(`${longDate(ap)} · In the air`,
+    head(`${longDate(ap)} · ${tookOff(l) ? 'In the air' : 'Likely in the air'}`,
       h`Landing at ${l.to}<br><b class="tn" data-k="arr-${l.id}">${N.time(l.arr.time, ap)}.</b>`,
-      subLine([`${fno(l)} · ${l.from} → ${l.to}`, l.arr.time && T(l.arr.time) > nowMs() ? h`lands in ${until(l.arr.time)}` : ''])),
+      subLine([fno(l), pair(l.from, l.to), l.arr.time && T(l.arr.time) > nowMs() ? h`lands in ${until(l.arr.time)}` : ''])),
     sec(changesBn),
     sec(() => legAlerts(S.legs)),
     sec(() => alertsFor([l.to])),
@@ -617,16 +673,16 @@ function connCard(dir) {
   const lvl = levelOf(c);
   const chip = {ok: 'chip td-lv', tight: 'chip td-lv td-chipc', risk: 'chip td-lv rose'}[lvl];
   const walk = c.walk && c.walk.known
-    ? `About ${c.walk.min} min walk, gate ${a.arr.gate} to ${b.dep.gate}`
-    : `${a.arr.gate ? `Arriving at gate ${a.arr.gate}; next gate not posted yet` : b.dep.gate ? 'Arrival gate not posted yet' : 'Gates not posted yet'} · plan on about ${c.walk ? c.walk.min : 15} min walking`;
+    ? `About ${c.walk.min}\u00a0min walk, gate ${a.arr.gate} to ${b.dep.gate}`
+    : `About ${c.walk ? c.walk.min : 15}\u00a0min to walk ${posts(a.arr.gate, b.dep.gate)}${a.arr.gate ? ` \u00b7 arriving at gate ${a.arr.gate}` : ''}`;
   const lost = missed(c);
   const sp = spareOf(c);
   const spare = lost ? 'Due to land after it leaves. The AA app shows rebooking.'
-    : sp == null ? '' : sp >= 0 ? `About ${N.dur(sp)} to spare before doors close` : 'Doors may close before you reach the gate';
+    : sp == null ? '' : sp >= 0 ? `About ${dur(sp)} to spare before doors close` : 'Doors may close before you reach the gate';
   return h`<a class="card sand td-a td-plan" href="#connect/${dir}">
-    <div class="td-planh td-planw"><div class="grow"><div class="ey">${city(c.at)} connection</div><div class="td-big tn">${lost ? `Lands after ${fno(b)} leaves` : `${N.dur(c.ground)} on the ground`}</div></div><span class="${chip}">${lost ? 'At risk' : levelTxt(c)}</span></div>
+    <div class="td-planh td-planw"><div class="grow"><div class="ey">${city(c.at)} connection</div><div class="td-big tn">${lost ? `Lands after ${fno(b)} leaves` : `${dur(c.ground)} on the ground`}</div></div><span class="${chip}">${lost ? 'At risk' : levelTxt(c)}</span></div>
     <div class="td-rows">
-      ${ln('plane-departure', h`<b>${fno(b)} boards ${N.time(b.board, b.from)}</b>${b.dep.gate ? h` · gate <span data-k="gate-${b.id}">${b.dep.gate}</span>` : ''}`)}
+      ${ln('plane-departure', h`<b class="td-nw">${fno(b)} boards ${N.time(b.board, b.from)}</b>${b.dep.gate ? h` · gate <span data-k="gate-${b.id}">${b.dep.gate}</span>` : ''}`)}
       ${ln('walk', walk)}
       ${ln('clock', spare)}
     </div>
@@ -636,7 +692,7 @@ function connCard(dir) {
 // The walking route between the two gates, when this airport has a walking map.
 function routeBtn(code, from, to) {
   if (!(N.guideFor(code) || {}).nav) return '';
-  const label = from && to ? `Route ${from} → ${to}` : to ? `Route to ${to}` : `${code} walking map`;
+  const label = from && to ? h`Route ${from} ${arw()} ${to}` : to ? `Route to ${to}` : `${code} walking map`;
   return h`<a class="btn td-btn td-route" href="#nav/${code.toLowerCase()}/@arr/@dep">${icon('route')}<span>${label}</span></a>`;
 }
 // On the ground between flights. Once boarding has started (or the connection is at risk)
@@ -650,17 +706,18 @@ function vConnect(S) {
   const go = t < T(b.doors) && (t >= T(b.board) || atRisk);
   const fromG = a && a.arr.gate, toG = b.dep.gate;
   const walkMin = c && c.walk && c.walk.known ? c.walk.min : null;
+  const guess = c && c.walk ? c.walk.min : 15;
   const walk = walkMin != null
-    ? `About ${walkMin} min walk from gate ${fromG}`
-    : fromG ? `You arrived at gate ${fromG}. Allow 5–20 min to walk.` : 'Allow 5–20 min to walk between concourses.';
+    ? `About ${walkMin}\u00a0min walk from gate ${fromG}`
+    : `About ${guess}\u00a0min to walk ${posts(fromG, toG)}.${fromG ? ` You arrived at gate ${fromG}.` : ''}`;
   const find = dir === 'out' ? stepBy(ap, 'connect', 'device-mobile') : null;
   const food = dir === 'out' ? stepBy(ap, 'connect', 'tools-kitchen-2') : null;
   let hl, sub;
   if (go) {
     hl = toG ? h`Go to<br><b data-k="gate-hl-${b.id}">${toG} now.</b>` : h`${fno(b)} is<br><b>boarding.</b>`;
     sub = subLine([
-      atRisk ? h`<span class="td-warn">At risk</span>` : '',
-      walkMin != null ? `${walkMin} min walk` : `${atRisk ? 'a' : 'A'}llow 5–20 min to walk`,
+      atRisk ? h`<span class="td-risk">At risk</span>` : '',
+      `${walkMin != null ? '' : atRisk ? 'about ' : 'About '}${walkMin != null ? walkMin : guess}\u00a0min walk`,
       h`doors close <span class="tn" data-k="doors-${b.id}">${N.time(b.doors, ap)}</span>`,
     ], dot(atRisk ? 'td-dbad' : lvl === 'tight' ? 'td-dcau' : 'td-dok'));
   } else if (t < T(b.board)) {
@@ -688,7 +745,7 @@ function vConnect(S) {
     go ? '' : route,
     sec(() => lineCard([
       food && !atRisk && !go ? h`<div class="td-lnw">${stepLn(food, 2)}</div>` : '',
-      linkRow(`#connect/${dir}`, 'route', 'Connection details', c ? (missed(c) ? c.text : `${N.dur(c.ground)} on the ground · ${levelTxt(c)}`) : ''),
+      linkRow(`#connect/${dir}`, 'route', 'Connection details', c ? (missed(c) ? c.text : `${dur(c.ground)} on the ground · ${levelTxt(c)}`) : ''),
       linkRow(`#airport/${ap.toLowerCase()}`, 'building-airport', `${port(ap)} airport guide`, 'Gates, food, restrooms'),
     ])),
     sec(() => tiles([wxTile(b.to, b.arr.time)])),
@@ -697,21 +754,25 @@ function vConnect(S) {
 function bagsCard(l) {
   const bg = l.arr.baggage;
   const st = stepBy(l.to, 'arrive', 'luggage', /bag/i);
+  // Once the carousel is posted, the sentences saying where it will show are old news.
+  const all = String(st && st.detail || '');
+  const detail = bg ? (all.match(/[^.!?]+[.!?]+(?=\s|$)/g) || [all]).filter(x => !/\b(AA app|screens?)\b/i.test(x)).join('').trim()
+    : all || 'The screens in baggage claim and the AA app show the carousel.';
   return h`<div class="card td-bags">
     <div class="td-planh"><div class="grow"><div class="ey">Baggage claim · ${l.to}</div><div class="td-big" data-k="bag-${l.id}">${bg ? `Carousel ${bg}` : 'Carousel not posted yet'}</div></div><span class="ic">${icon('luggage')}</span></div>
-    <p class="td-p">${st ? st.detail : 'The screens in baggage claim and the AA app show the carousel.'}</p>
+    ${detail ? h`<p class="td-p">${glue(detail)}</p>` : ''}
   </div>`;
 }
-// Best way from LGA to the hotel right now → #transit.
 // Best way from LGA to the hotel right now → #transit. Transit's own pick (N.bestRoute)
-// wins when Transit shares it, so both screens name the same route.
+// wins when Transit shares it, so both screens name the same route. With no hotel saved
+// it is the way into town.
 function hotelRoute(prefix = 'Get to') {
   const routes = (guide().transit && guide().transit.to_hotel) || [];
   const tr = traffic('to_hotel');
   const ht = N.hotel();
-  const dest = ht ? (ht.name || 'the hotel') : 'the hotel';
+  const ttl = ht ? `${prefix} ${ht.name || 'the hotel'}` : prefix.replace(/to$/, 'into town');
   const pick = transitPick('hotel');
-  if (!routes.length && !pick) return linkRow('#transit', 'route', `${prefix} ${dest}`, 'Routes aren’t loaded yet · open Transit');
+  if (!routes.length && !pick) return linkRow('#transit', 'route', ttl, 'Routes aren’t loaded yet · open Transit');
   let best = routes[0] || {}, why = '', mins = '';
   if (pick) {
     best = routes.find(r => r.id === pick.id || r.name === pick.name) || {};
@@ -719,13 +780,13 @@ function hotelRoute(prefix = 'Get to') {
   } else {
     if (tr && tr.min && tr.typical_min && tr.min > tr.typical_min * 1.35) {
       const alt = routes.find(r => !r.traffic_key && /subway|train|q70/i.test(`${r.id} ${r.name}`));
-      if (alt) { best = alt; why = `Roads are slow (${tr.min} min by car), so ${alt.name} is steadier.`; }
+      if (alt) { best = alt; why = `Roads are slow (${tr.min}\u00a0min by car), so ${alt.name} is steadier.`; }
     }
-    mins = best.traffic_key && tr && tr.min ? `${tr.min} min now` : minsText(best.min);
+    mins = best.traffic_key && tr && tr.min ? `${tr.min}\u00a0min now` : minsText(best.min);
   }
   const name = pick ? pick.name : best.name;
   return h`<a class="card sand td-a td-plan" href="#transit">
-    <div class="${N.cls('td-planh', mins && 'td-planw')}"><div class="grow"><div class="ey">${prefix} ${dest}</div><div class="td-big">${name}</div></div>${mins ? h`<span class="chip td-lv tn">${mins}</span>` : ''}</div>
+    <div class="${N.cls('td-planh', mins && 'td-planw')}"><div class="grow"><div class="ey">${ttl}</div><div class="td-big">${name}</div></div>${mins ? h`<span class="chip td-lv tn">${mins}</span>` : ''}</div>
     <div class="td-rows">
       ${best.summary ? ln('route', best.summary) : ''}
       ${why ? ln('traffic-cone', why) : ''}
@@ -804,13 +865,13 @@ function vRetUnknown(S) {
     sec(changesBn),
     sec(() => legAlerts(legs)),
     sec(() => alertsFor([ap, 'CLT'])),
-    sec(() => h`<a class="card line td-a td-line td-legs" href="#flights">${legs.map(l => h`<div class="td-leg"><div class="grow"><b>${fno(l)}</b><small>${l.from} → ${l.to}</small></div><span class="td-warn">${l.dep.time ? tmz(l.dep.time, l.from) : 'Time not confirmed'}</span></div>`)}<span class="td-more">Both flights${icon('chevron-right')}</span></a>`),
+    sec(() => h`<a class="card line td-a td-line td-legs" href="#flights">${legs.map(l => h`<div class="td-leg"><div class="grow"><b>${fno(l)}</b><small>${pair(l.from, l.to)}</small></div>${l.dep.time ? h`<span class="tn">${tmz(l.dep.time, l.from)}</span>` : ''}</div>`)}<span class="td-more">Both flights${icon('chevron-right')}</span></a>`),
     sec(() => h`<a class="card sand td-a td-plan" href="#transit">
       <div class="${N.cls('td-planh', mins && 'td-planw')}"><div class="grow"><div class="ey">Getting to ${ap}</div><div class="td-big">${best ? best.name : 'Hotel to the airport'}</div></div>${mins ? h`<span class="chip td-lv tn">${mins}</span>` : ''}</div>
       <div class="td-rows">
-        ${tr && tr.text ? ln('car', tr.text) : ''}
+        ${ln('car', tr && tr.min && tr.text ? tr.text : `About ${N.drive('ret').min}\u00a0min by car with normal traffic`)}
         ${plan.note ? ln('info-circle', sentences(plan.note, 1)) : ''}
-        ${plan.arrive_before_min ? ln('clock', `Plan to be at ${ap} ${N.dur(plan.arrive_before_min)} before departure once times are confirmed.`) : ''}
+        ${plan.arrive_before_min ? ln('clock', `Plan to be at ${ap} ${dur(plan.arrive_before_min)} before departure once times are confirmed.`) : ''}
       </div>
       <span class="td-more">All ways to ${ap}${icon('chevron-right')}</span></a>`),
     (terminal || secStep) ? sec(() => h`<div class="card line td-line td-pad">${terminal ? stepLn(terminal, 2) : ''}${secStep ? stepLn(secStep, 2) : ''}</div>`) : '',
@@ -840,7 +901,7 @@ function nycWeather() {
 function foodCard() {
   const f = foodNow();
   if (!f.total) return linkRow('#food', 'tools-kitchen-2', 'Food list', 'Not loaded yet · open Food to try again');
-  const names = f.open.slice(0, 3).map(x => x.p.name + (x.away != null ? ` (${N.walkMin(x.away)} min)` : ''));
+  const names = f.open.slice(0, 3).map(x => x.p.name + (x.away != null ? ` (${N.walkMin(x.away)}\u00a0min)` : ''));
   const sub = f.open.length ? meta(names)
     : f.next ? `Next to open: ${f.next.p.name}, ${f.next.hr.short ? f.next.hr.short.replace(/^Opens /, '') : 'soon'}` : 'Check the list for hours';
   return h`<a class="card td-a td-food" href="#food">
@@ -851,8 +912,8 @@ function foodCard() {
 }
 function hotelCard() {
   const ht = N.hotel();
-  return ht ? linkRow('#hotel', 'bed', ht.name || 'Your hotel', ht.address || 'Address and directions')
-    : linkRow('#wallet', 'bed', 'Add your hotel in Wallet', 'Then Today and Transit can point you there. It stays on this phone.');
+  return lineCard([ht ? linkRow('#hotel', 'bed', ht.name || 'Your hotel', ht.address || 'Address and directions')
+    : linkRow('#wallet', 'bed', 'Add your hotel in Wallet', 'Then Today and Transit can point you there. It stays on this phone.')]);
 }
 function returnCard(today) {
   const legs = N.dirLegs('ret');
@@ -864,9 +925,9 @@ function returnCard(today) {
   return h`<div class="card line td-line">
     <a class="td-a td-legs" href="#flights">
       <div class="ey">Flying home · ${legDate(r1)}</div>
-      ${legs.map(l => h`<div class="td-leg"><div class="grow"><b>${fno(l)}</b><small>${l.from} → ${l.to}</small></div><span class="${l.dep.time ? 'tn' : 'td-warn'}">${l.dep.time ? `${N.time(l.dep.time, l.from)} → ${N.time(l.arr.time, l.to)}` : 'Time not confirmed'}</span></div>`)}
+      ${legs.map(l => h`<div class="td-leg"><div class="grow"><b>${fno(l)}</b><small>${pair(l.from, l.to)}</small></div>${l.dep.time ? h`<span class="tn">${range(N.time(l.dep.time, l.from), N.time(l.arr.time, l.to))}</span>` : ''}</div>`)}
     </a>
-    ${unconf ? h`<a class="td-a td-flagl" href="${AA_TRIPS}" target="_blank" rel="noopener">${icon('alert-triangle')}<span class="grow">Return flights not confirmed yet — check AA Trips</span>${icon('external-link')}</a>` : ''}
+    ${unconf ? h`<a class="td-a td-flagl" href="${AA_TRIPS}" target="_blank" rel="noopener">${icon('alert-triangle')}<span class="grow">Check AA Trips for the times</span>${icon('external-link')}</a>` : ''}
     ${ci ? (ci.open ? extRow(AA_TRIPS, 'ticket', 'Check-in is open', 'Check in at aa.com or the AA app')
       : h`<div class="td-lnci">${ln('ticket', h`<b>Check-in opens ${when(ci.opens, r1.from)}</b> · aa.com or the AA app`)}</div>`)
       : left <= 1 ? h`<div class="td-lnci">${ln('ticket', 'Check-in opens 24 hours before departure, on aa.com or the AA app.')}</div>` : ''}
@@ -886,7 +947,7 @@ function vStay() {
     : retDate ? subLine([`Flying home ${dateOf(retDate)}`, left === 1 ? 'tomorrow' : left > 1 ? `in ${left} days` : 'today']) : '';
   return [
     head(`${longDate('NYC')} · New York`, hl, sub),
-    sec(() => staleCo('NYC')),
+    sec(staleCo),
     sec(changesBn),
     sec(nycWeather),
     sec(foodCard),
@@ -932,7 +993,7 @@ function modeKey() {
   if (ph === 'out' || ph === 'ret') {
     const s = dirState(ph);
     k += `|${s.mode}|${s.leg ? s.leg.id : ''}`;
-    if (s.mode === 'leave' && s.lv) k += T(s.lv.at) - nowMs() > 3 * HOUR ? '|far' : '|near';
+    if (s.mode === 'leave' && s.lv) k += (T(goAt(s.lv)) - nowMs() > 3 * HOUR ? '|far' : '|near') + (s.lv.pick ? '|pick' : '');
     if (s.mode === 'leavenow' && s.lv) k += `|late${lateBy(s.lv)}`;
     k += `|${compact(s)}|${homeLong(s)}`;
     if (s.mode === 'connect' && s.leg) k += `|${nowMs() >= T(s.leg.board)}`;

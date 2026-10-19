@@ -25,6 +25,8 @@ N.h = (str, ...vals) => new Raw(str.reduce((a, s, i) => a + s + (i < vals.length
 N.icon = (name, cls = '') => new Raw(`<svg class="i ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`);
 N.cls = (...a) => a.filter(Boolean).join(' ');
 N.plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+// A meta line: the non-empty parts joined with ' · ', each kept whole so a separator never ends a line.
+N.mline = (...parts) => N.h`${parts.filter(p => p != null && p !== false && String(p) !== '').map((p, i) => N.h`${i ? ' · ' : ''}<span class="nw">${p}</span>`)}`;
 N.clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 N.report = (e, where = '') => {
@@ -83,7 +85,15 @@ N.until = iso => {
   const m = Math.round((toDate(iso) - N.now()) / 60000);
   if (m <= 0) return 'now';
   const d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60);
-  return d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m} min`;
+  // Same shape as N.dur: no zero part ("1h", not "1h 0m"; "2d", not "2d 0h").
+  return d ? (h ? `${d}d ${h}h` : `${d}d`) : h ? (m % 60 ? `${h}h ${m % 60}m` : `${h}h`) : `${m} min`;
+};
+// A flight number as people read it: carrier, no-break space, number ("AA 1234").
+N.flightNo = l => {
+  if (!l) return '';
+  const num = l.num || String(l.flight || '').replace(/^\D+/, '');
+  const car = l.carrier || (String(l.flight || '').match(/^\D+/) || ['AA'])[0];
+  return num ? `${car}\u00a0${num}` : String(l.flight || 'Flight');
 };
 N.ago = iso => {
   if (!iso) return 'never';
@@ -354,8 +364,10 @@ N.route = () => {
   const i = h.indexOf('/');
   return i < 0 ? {name: h, param: null, hash: h} : {name: h.slice(0, i), param: h.slice(i + 1), hash: h};
 };
-// How the next navigation started: 'go' (a link), 'tab', 'back', or null for the
-// browser's own back and forward. Everything but 'go' returns to the old scroll spot.
+// How the next navigation started: 'go' (N.go), 'tab', 'back', or null. With null,
+// navigate() reads the history entry: one the app has shown before is the browser's
+// own back or forward, a fresh one is a plain <a href> link and counts as 'go'.
+// Everything but 'go' returns to the old scroll spot.
 let navKind = null;
 N.go = (h, replace = false) => {
   h = String(h).replace(/^#/, '');
@@ -393,12 +405,15 @@ function setPill(i) {
 
 function topbar(def) {
   // Before the trip is unlocked there is nothing to open, so only the wordmark shows.
-  if (!N.unlocked()) return N.h`<span style="width:38px"></span><span class="wm">nyc.</span><span style="width:38px"></span>`;
+  // The spacers match the menu and wallet buttons' widths, so the wordmark sits where it does on every other screen.
+  if (!N.unlocked()) return N.h`<span class="tbb" aria-hidden="true"></span><span class="wm">nyc.</span><span class="av-sp" aria-hidden="true"></span>`;
   const left = def.back
     ? N.h`<button class="tbb" data-act="back" aria-label="Back">${N.icon('arrow-left')}</button>`
     : N.h`<button class="tbb" data-act="menu" aria-label="Menu" aria-expanded="false">${N.icon('menu-2')}</button>`;
-  return N.h`${left}<a class="wm" href="#today" aria-label="Today">nyc.</a>
-    <button class="av" data-act="go" data-arg="wallet" aria-label="Wallet">${N.icon('wallet')}</button>`;
+  // On Wallet itself the button would only point back at this screen.
+  const right = def.name === 'wallet' ? N.h`<span class="av-sp" aria-hidden="true"></span>`
+    : N.h`<button class="av" data-act="go" data-arg="wallet" aria-label="Wallet">${N.icon('wallet')}</button>`;
+  return N.h`${left}<a class="wm" href="#today" aria-label="Today">nyc.</a>${right}`;
 }
 
 // The thin line under the top bar: offline or old flight data.
@@ -449,7 +464,7 @@ function paint(def, ctx) {
   catch (e) {
     N.report(e, 'render ' + def.name);
     out = {hero: N.h`<h1 class="hl">Something went wrong</h1>`,
-      body: N.h`<div class="co plain">${N.icon('alert-circle')}<span>This screen hit a problem. Your saved data is safe. <button class="chip" data-act="reload">Reload</button></span></div>`};
+      body: N.h`<div class="co plain">${N.icon('alert-circle')}<span><b>This screen hit a problem.</b> Your saved data is safe. <button class="chip" data-act="reload">Reload</button></span></div>`};
   }
   el.view.dataset.tone = def.tone || 'band';
   el.view.dataset.screen = def.name;
@@ -480,7 +495,10 @@ let navSeq = 0;
 const scrollMem = new Map();
 async function navigate() {
   const route = N.route();
-  const kind = navKind; navKind = null;
+  // Entries the app has painted carry {nyc:1}; see navKind.
+  const seen = !!(history.state && history.state.nyc);
+  const kind = navKind || (seen ? null : 'go'); navKind = null;
+  if (!seen) try { history.replaceState(Object.assign({}, history.state, {nyc: 1}), ''); } catch (e) { /* Safari rate limit */ }
   let def = screens[route.name];
   if (!N.unlocked()) def = screens.unlock;
   else if (!def || def.name === 'unlock') { N.go('today', true); return; }
@@ -559,11 +577,11 @@ function menuHtml() {
     ['settings', 'settings', 'Settings', 'Theme, alerts, leave buffer'],
     ['data', 'refresh', 'Data & updates', 'Flight status and offline maps'],
   ];
-  return N.h`<div class="mhd"><button class="tbb" data-act="menu" aria-label="Close menu">${N.icon('x')}</button><span class="wm">nyc.</span><span style="width:38px"></span></div>
+  return N.h`<div class="mhd"><button class="tbb" data-act="menu" aria-label="Close menu">${N.icon('x')}</button><span class="wm">nyc.</span><span class="av-sp" aria-hidden="true"></span></div>
   <div class="mbody gut">
-    <div class="smr row" style="gap:14px"><span class="av" style="width:64px;height:64px;font-size:28px">${N.icon('user')}</span>
-      <div><div style="font-size:22px;font-weight:800">${(w.names || [])[0] ? `${w.names[0].split(' ')[0]}’s trip` : 'Your trip'}</div><div class="tn" style="font-size:15px">${t ? `${t.trip.title} · ${range}` : ''}</div></div></div>
-    <div style="margin-top:18px">${rows.map(r => N.h`<button class="smr mr" data-act="go" data-arg="${r[0]}"><span class="mi">${N.icon(r[1])}</span><span class="mt">${r[2]}<small>${r[3]}</small></span>${N.icon('chevron-right')}</button>`)}</div>
+    <div class="smr mme"><span class="av">${N.icon('user')}</span>
+      <div><b>${(w.names || [])[0] ? `${w.names[0].split(' ')[0]}’s trip` : 'Your trip'}</b>${t ? N.h`<small class="tn">${N.mline(t.trip.title, range)}</small>` : ''}</div></div>
+    <div class="mrows">${rows.map(r => N.h`<button class="smr mr" data-act="go" data-arg="${r[0]}"><span class="mi">${N.icon(r[1])}</span><span class="mt">${r[2]}<small>${r[3]}</small></span>${N.icon('chevron-right')}</button>`)}</div>
   </div>`;
 }
 function openMenu() {

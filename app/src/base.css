@@ -36,7 +36,9 @@ input,select,textarea{font:inherit;color:inherit}
 .tb :is(.tbb,.av){transition:opacity .2s,scale var(--press) var(--ease)}
 .wm{font-family:Figtree,Inter,system-ui,sans-serif;font-weight:800;font-size:22px;letter-spacing:-.03em;text-decoration:none;color:inherit;padding:7px 10px;margin:-7px -10px;border-radius:14px}
 .av{width:38px;height:38px;border-radius:50%;background:var(--cr);color:var(--eb);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;position:relative}
-.tb .av::after{content:'';position:absolute;inset:-3px;border-radius:50%}
+.tb .av::after{content:'';position:absolute;inset:-3px}
+/* Holds the wallet button's place on Wallet itself, so the wordmark stays centred. */
+.av-sp{width:38px;height:38px;flex:none}
 #view[data-tone="cream"] .av{background:var(--sheet)}
 
 #strip:empty{display:none}
@@ -66,7 +68,8 @@ input,select,textarea{font:inherit;color:inherit}
 #view::after{content:'';position:fixed;z-index:7;left:0;right:0;bottom:0;height:calc(90px + env(safe-area-inset-bottom,0px));pointer-events:none;
   background:linear-gradient(to top,var(--sheet) 35%,transparent);transition:opacity .3s}
 #view[data-tone="cream"]::after{background:linear-gradient(to top,var(--cr) 35%,transparent)}
-#view.nonav::after,#app.mo #view::after{opacity:0}
+/* A full-bleed map (Food's map view) runs to the bottom edge and keeps its own colour there. */
+#view.nonav::after,#view.fd-mapon::after,#app.mo #view::after{opacity:0}
 
 /* Floating nav */
 .nv{position:fixed;z-index:8;left:max(16px,env(safe-area-inset-left,0px));right:max(16px,env(safe-area-inset-right,0px));
@@ -92,11 +95,16 @@ input,select,textarea{font:inherit;color:inherit}
 #app.mo .nv{transform:translateY(calc(100% + 40px + env(safe-area-inset-bottom,0px)));opacity:0;pointer-events:none}
 .mhd{display:flex;align-items:center;justify-content:space-between;height:56px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .mbody{padding-top:14px}
+.mme{display:flex;align-items:center;gap:var(--sp-4)}
+.mme .av{width:64px;height:64px;font-size:28px}
+.mme b{display:block;font-size:22px;font-weight:800;line-height:1.2}
+.mme small{display:block;margin-top:2px;font-size:15px;color:var(--obm)}
+.mrows{margin-top:var(--sp-5)}
 .smr{opacity:0;transform:translateX(-18px);transition:opacity .3s,transform .56s cubic-bezier(.32,.72,0,1)}
 #app.mo .smr{opacity:1;transform:none}
 .mr{display:flex;align-items:center;gap:14px;min-height:56px;width:calc(100% + 20px);margin:0 -10px;padding:0 10px;border-radius:16px;color:var(--obt)}
 .mi{width:36px;height:36px;border-radius:12px;background:var(--onband2);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none}
-.mt{flex:1;font-size:17px;font-weight:600;line-height:1.2}.mt small{display:block;font-size:13px;font-weight:400;opacity:.85}
+.mt{flex:1;font-size:17px;font-weight:600;line-height:1.2}.mt small{display:block;font-size:13px;font-weight:400;color:var(--obm)}
 .mr>.i{font-size:18px}
 
 /* ---------- Type ---------- */
@@ -229,9 +237,12 @@ p,small,.mu,.sub{text-wrap:pretty}
    wide things never visibly shrink. Maps, drag tracks and scrims keep their own
    feedback. iOS only applies :active because core.js listens for touchstart. */
 :where(button,a[href],[data-act]){transition:scale var(--press) var(--ease),opacity var(--press)}
-:where(button,a[href],[data-act]):not(:where(.leaflet-container *,.ap-mv,.ap-mv *,.pl-lb-track,.pl-lb-track *,.fd-scrim,.na-grab,[disabled],[aria-disabled="true"])):active{scale:.97;opacity:.82}
-:is(button,a[href]):is(.op,.tr-op,.na-row,.na-li,.na-card,.fd-card,.td-mini,.td-row,.td-legs,.td-stale,.wl-cb,.wl-card,.wl-addrow,.ap-step,.fx-row,.fl-tk,.fl-cx,.card,.bn,.co,.tile,.mr,.strip):active{
+:where(button,a[href],[data-act]):not(:where(.leaflet-container *,.ap-mv,.ap-mv *,.pl-lb-track,.pl-lb-track *,.fd-scrim,.na-grab,.tr-mapa,.pl-mapa,[disabled],[aria-disabled="true"])):active{scale:.97;opacity:.82}
+:is(button,a[href]):is(.op,.tr-op,.na-row,.na-li,.na-card,.fd-card,.td-mini,.td-row,.td-legs,.td-stale,.wl-cb,.wl-card,.wl-addrow,.wl-link,.ap-step,.ap-gr,.ap-fl,.ap-lk,.ap-tr,.ap-call,.tr-pill,.tr-place,.tr-lk,.fx-row,.fl-tk,.fl-cx,.fl-tbc,.card,.bn,.co,.tile,.mr,.strip):active{
   scale:none;opacity:1;background-image:linear-gradient(color-mix(in srgb,var(--ink) 6%,transparent),color-mix(in srgb,var(--ink) 6%,transparent))}
+/* Gallery photos sit in a sideways snap row: they dim but never shrink, so a swipe
+   that starts on one doesn't make it jump. */
+.pl-ph:active{scale:none}
 
 /* Motion helpers */
 .sw{transition:transform .56s cubic-bezier(.32,.72,0,1),opacity .26s ease}

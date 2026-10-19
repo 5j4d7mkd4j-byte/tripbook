@@ -15,7 +15,6 @@
 .td-mw{display:block;min-width:0;flex:1 1 auto;overflow:hidden}
 .td-mt{display:flex;flex-wrap:wrap;margin-left:-16px}
 .td-mt>span::before{content:'·';display:inline-block;width:16px;text-align:center}
-.td-old{color:var(--rot);font-weight:600}
 /* Status dot by status only: on time --eb, caution --warn, late or cancelled rose. */
 .td .dot.td-dok{background:var(--eb)}
 .td .dot.td-dcau{background:var(--warn)}
@@ -58,7 +57,7 @@
 .td-rows{margin-top:12px}
 .td-ln{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4}
 .td-ln>.i{font-size:17px;margin-top:2px;flex:none}
-.td-ln>span{min-width:0;overflow-wrap:anywhere}
+.td-ln>span{min-width:0;overflow-wrap:anywhere;text-wrap:pretty}
 .td-ln+.td-ln{margin-top:9px}
 .td-lnw{padding:12px 0 4px}
 .td-more{display:flex;align-items:center;gap:4px;margin-top:14px;font-size:14px;font-weight:700;color:var(--eb)}
@@ -96,7 +95,10 @@
 .td-row small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
 .td-row .grow{overflow-wrap:anywhere}
 .td-chev{font-size:18px;color:var(--mu);flex:none}
-.td-warn{color:var(--rot);font-weight:600}
+/* Caution: a --warn icon with ink words. Rose (.td-risk) only for a real risk. */
+.td-warn{color:var(--ink);font-weight:600}
+.td-warn .i{font-size:14px;color:var(--warn);margin-right:4px;vertical-align:-2px}
+.td-risk{color:var(--rot);font-weight:700}
 .td-row small .td-warn{font-weight:700}
 .td-ci{display:flex;align-items:center;gap:var(--sp-1);background:var(--cr);border-radius:20px;padding:6px 4px 6px 14px}
 .td-ci>.td-row{flex:1 1 auto}
@@ -123,8 +125,13 @@
   background:var(--sheet);color:var(--ink);font-size:14px;font-weight:700;text-decoration:none}
 .td-got .i{font-size:16px;margin:0}
 .td-flag{display:flex;align-items:center;min-height:44px;text-decoration:none}
+.td-flag>.i:first-child{color:var(--warn)}
 .td-flag>.i:last-child{font-size:18px;flex:none}
-.td-stale{display:flex;align-items:center;width:100%;min-height:44px}
+/* Old data outside the travel window: core's strip in a callout, one tap to refresh. */
+.td-stale{display:flex;width:100%;min-height:44px;font:inherit;text-align:left;border:0;cursor:pointer}
+.td .co.td-stale{align-items:center;font-size:14px}
+.td .co.td-stale>.i{margin-top:0}
+.td-stale>b{flex:none;font-weight:800}
 .td .co{font-size:14px;align-items:flex-start}
 /* Icon centred on the first text line (14px × 1.45 line, 18px icon). */
 .td .co>.i{margin-top:1px}
@@ -137,8 +144,10 @@
 .td-leg>span{font-size:14px;font-weight:600;text-align:right}
 .td-legs .td-more{margin-top:6px}
 .td-line .td-legs{padding-top:12px}
-.td-flagl{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;font-weight:700;color:var(--rot);text-decoration:none}
+.td-flagl{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;font-weight:700;color:var(--ink);text-decoration:none}
 .td-flagl .i{font-size:17px;flex:none}
+.td-flagl .i:first-child{color:var(--warn)}
+.td-flagl .i:last-child{color:var(--mu)}
 
 /* Weather */
 .td-wxnow{display:flex;align-items:center;gap:12px;margin-top:8px}

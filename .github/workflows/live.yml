@@ -5,6 +5,8 @@
 # a run checks once; on the other days around the trip, once an hour. Scheduled
 # runs outside all of these end in seconds without any lookups.
 # Logs carry counts and mode words only; flight details exist only inside the sealed file.
+# run.py also pushes lock-screen alerts (updater/alerts.py) once the VAPID_PRIVATE_KEY
+# and PUSH_SUBS secrets exist; without them it skips sending.
 name: live status
 
 on:
@@ -19,6 +21,10 @@ on:
         description: Run even outside the travel windows
         type: boolean
         default: true
+      test_alert:
+        description: Send a test alert to every phone
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # push to the live branch
@@ -47,6 +53,17 @@ jobs:
         with:
           node-version: 20
 
+      # "Alerts are on" to every phone (dispatch with test_alert). Counts only in the log.
+      - name: Test alert
+        if: github.event_name == 'workflow_dispatch' && inputs.test_alert
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          TRIP_KEY: ${{ secrets.TRIP_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBS: ${{ secrets.PUSH_SUBS }}
+        run: node updater/push.mjs test
+
       # hot | travel | slow | idle. A hot window starting within 15 min counts as hot.
       - name: Decide
         id: decide
@@ -66,6 +83,8 @@ jobs:
         timeout-minutes: 8
         env:
           TRIP_KEY: ${{ secrets.TRIP_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBS: ${{ secrets.PUSH_SUBS }}
         run: |
           args=(--source actions)
           if [ "$SLOW" = "true" ]; then args+=(--slow --slow-minutes 60); fi
@@ -83,4 +102,6 @@ jobs:
         timeout-minutes: 340
         env:
           TRIP_KEY: ${{ secrets.TRIP_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_SUBS: ${{ secrets.PUSH_SUBS }}
         run: python3 updater/run.py --source actions --loop

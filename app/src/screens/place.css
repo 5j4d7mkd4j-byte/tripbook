@@ -52,7 +52,9 @@
 .pl-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
 .pl-ok{background:var(--sheet);color:var(--ink)}
 .pl-ok .pl-dot{background:var(--ok)}
-.pl-soon{background:var(--rob);color:var(--robt)}
+.pl-soon{background:var(--sheet);color:var(--ink)}
+/* closing soon is a caution: the amber dot carries it, the words stay ink */
+.pl-soon .pl-dot{background:var(--warn)}
 .pl-shut .pl-dot,.pl-na .pl-dot{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
 /* the Distance chip asks for your location; 40px to match its row, 44px to the finger */
 button.pl-ask{position:relative}

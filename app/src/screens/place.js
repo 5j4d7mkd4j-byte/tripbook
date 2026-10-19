@@ -66,10 +66,11 @@ const canLocate = () => !!navigator.geolocation && !N.lastWhere();
 
 // ---------- hours ----------
 // Only well-formed [weekday, "HH:MM", "HH:MM"] rows count, for the chip and the table alike,
-// so a bad row can't turn into "Closed" or "Open 24 hours".
-const HHMM = /^([01]?\d|2[0-4]):[0-5]\d$/;
+// so a bad row can't turn into "Closed" or "Open 24 hours". A late night ends past midnight
+// on the clock of the day it started ("25:45" is 1:45a), up to a day on.
+const HHMM = /^([01]?\d|2[0-4]):[0-5]\d$/, END = /^([0-3]?\d|4[0-7]):[0-5]\d$/;
 const validHours = p => arr(p && p.hours).filter(r => Array.isArray(r) && r.length >= 3 && Number.isInteger(r[0]) && r[0] >= 0 && r[0] <= 6
-  && HHMM.test(String(r[1])) && HHMM.test(String(r[2])));
+  && HHMM.test(String(r[1])) && END.test(String(r[2])));
 const NO_HOURS = {state: 'unknown', text: 'Hours not listed'};
 const hoursOf = p => {
   const rows = validHours(p);
@@ -552,6 +553,12 @@ function lbGestures(st) {
     track.removeEventListener('dblclick', dbl);
   };
 }
+// Keeps the strip on the page at photo i, under the lightbox as it pages, so closing lands there.
+function syncGal(view, i) {
+  const slide = view && N.$$('.pl-ph', view)[i], gal = slide && slide.parentElement;
+  if (gal) gal.scrollLeft = Math.max(0, slide.offsetLeft - 20);
+  return slide || null;
+}
 function openLb(p, idx, instant = false) {
   closeLb(true);
   const list = photosOf(p);
@@ -576,6 +583,7 @@ function openLb(p, idx, instant = false) {
     if (i === st.idx) return;
     if (st.unzoom) st.unzoom(false);
     st.idx = i;
+    syncGal(view, i);
     const n = N.$('[data-pl="lbn"]', el); if (n) n.textContent = `${i + 1} / ${st.n}`;
     N.$('.pl-lb-prev', el).disabled = i === 0;
     N.$('.pl-lb-next', el).disabled = i === st.n - 1;
@@ -625,9 +633,7 @@ function closeLb(quiet = false) {
   if (st.nav) st.nav.inert = false;
   if (quiet) return;
   // Return to the same photo in the strip on the page.
-  const slide = st.view && N.$$('.pl-ph', st.view)[st.idx];
-  const gal = slide && slide.parentElement;
-  if (gal) gal.scrollLeft = Math.max(0, slide.offsetLeft - 20);
+  const slide = syncGal(st.view, st.idx);
   const back = slide || (st.prevFocus && st.prevFocus.isConnected ? st.prevFocus : null);
   if (back) back.focus({preventScroll: true});
 }

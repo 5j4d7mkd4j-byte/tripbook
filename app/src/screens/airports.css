@@ -16,7 +16,6 @@
 .ap-hero .ap-sub{margin:12px 0 0;color:var(--obt)}
 .ap-hero .ap-sub b{display:block;font-size:16px;font-weight:700;line-height:1.3;text-wrap:balance}
 .ap-hero .ap-sub>span{display:block;margin-top:3px;font-size:13px;font-weight:600}
-.ap-hero .ap-sub .ap-nw{white-space:nowrap}
 /* The art sits beside the code and ends above the subtitle. */
 .ap-hero .ap-il{right:0;top:90px;width:28%;max-width:108px;height:auto;aspect-ratio:14/15}
 .ap-hero.ap-e{min-height:0}
@@ -30,6 +29,7 @@
 .ap-pg .ap-sh{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;min-width:0}
 .ap-pg .ap-sh .ey{flex:none}
 .ap-pg .ap-shs{font-size:13px;color:var(--mu);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ap-pg .ap-shs .i{font-size:14px;vertical-align:-2px}
 .ap-pg .ap-c44{height:44px;border-radius:22px;padding:0 16px;font-size:14px}
 .ap-pg .ap-ml{margin-top:12px}
 .ap-pg .ap-chev{font-size:20px;color:var(--mu);flex:none;align-self:center}
@@ -56,22 +56,31 @@
 .ap-pg .ap-seg button{flex:1;height:44px;border-radius:20px;justify-content:center;font-size:14px;white-space:nowrap;padding:0 8px}
 
 /* tiles */
-/* One line each; amber dot = worth a look, rose ring (.w) = a real problem. */
-.ap-pg .ap-cn span{font-size:13px;margin-top:2px}
+/* The value stays on one line; the subline wraps to two rather than ellipsizing ("Hours not
+   listed"). Amber dot = worth a look, rose ring (.w) = a real problem. */
+.ap-pg .ap-cn>div>span{font-size:13px;margin-top:2px;line-height:1.3;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .ap-pg .ap-cn .ap-cw span{color:var(--ink)}
 .ap-pg .ap-cn .ap-cw span::before{content:'';display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--warn);vertical-align:1px}
 .ap-pg .ap-cos{margin-top:14px}
-/* A tight (not at-risk) connection: sand callout with an amber edge; rose is kept for "At risk". */
-.ap-pg .co.ap-tight{box-shadow:inset 0 0 0 2px var(--warn)}
+/* Caution (a tight connection, a delay, a weather alert): cream with an amber edge and icon, ink
+   text. Rose is kept for what stops you: at risk, canceled, a ground stop. */
+.ap-pg .co.ap-warn{background:var(--cr);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--warn)}
+.ap-pg .co.ap-warn .i{color:var(--warn)}
 .ap-pg .co .ap-il2{display:flex;align-items:center;width:fit-content;min-height:44px;margin-top:8px;padding:0 16px;border-radius:22px;
   background:var(--sheet);color:var(--ink);text-decoration:none;font-weight:700;font-size:14px}
 
 /* your flights here */
-.ap-pg .ap-fl{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px;border-radius:20px;background:var(--cr);color:var(--ink);text-decoration:none;min-width:0}
-.ap-pg .ap-fl .ic{background:var(--sheet)}
-.ap-pg .ap-fl b{display:block;font-size:15px;font-weight:800;line-height:1.25}
-.ap-pg .ap-fl small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
-.ap-pg .ap-fc{flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis}
+/* Grid: the status chip sits beside the flight line only; time and gate run the full width under
+   both, so a wide chip never pushes the meta onto extra lines. */
+.ap-pg .ap-fl{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:12px;align-items:center;min-height:64px;
+  padding:12px;border-radius:20px;background:var(--cr);color:var(--ink);text-decoration:none;min-width:0}
+.ap-pg .ap-fl .grow{display:contents}
+.ap-pg .ap-fl .ic{grid-row:1/span 3;background:var(--sheet)}
+.ap-pg .ap-fl b{grid-column:2;display:block;font-size:15px;font-weight:800;line-height:1.25}
+.ap-pg .ap-fl small{grid-column:2/4;display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
+/* The status chip caps its width and ellipsizes its label instead of clipping. */
+.ap-pg .ap-fc{grid-column:3;grid-row:1;min-width:0;max-width:150px}
+.ap-pg .ap-fc>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .ap-pg .ap-fl .chip.cr{background:var(--sheet)}
 
 /* jump row */
@@ -100,6 +109,9 @@
 .ap-pg .ap-sb b{display:block;font-size:15px;font-weight:800;line-height:1.3}
 .ap-pg .ap-sb small{display:block;font-size:13px;color:var(--mu);margin-top:3px;line-height:1.4}
 .ap-pg .ap-sb .ap-x{color:var(--ink);font-weight:600}
+/* Reaching the gate on a tight (amber) or at-risk (rose) connection: a dot, the text stays ink. */
+.ap-pg .ap-sb .ap-x:is(.ap-xw,.ap-xr)::before{content:'';display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--warn);vertical-align:1px}
+.ap-pg .ap-sb .ap-x.ap-xr::before{background:var(--ro)}
 .ap-pg .ap-mn{display:flex!important;align-items:center;gap:5px}
 .ap-pg .ap-in{display:inline-block;margin-top:4px;font-size:13px;font-weight:800;color:var(--eb)}
 .ap-pg .ap-sl{margin-top:10px;width:fit-content}

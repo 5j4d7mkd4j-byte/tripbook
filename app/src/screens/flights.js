@@ -41,11 +41,14 @@ const concourse = (ap, gate) => {
   if (ap === 'LGA' && n) return n >= 40 ? 'Eastern Concourse' : 'Western Concourse';
   return '';
 };
+// "PHX → CLT" with a drawn arrow; screen readers hear "PHX to CLT".
+const pair = (a, b) => h`<span class="nw">${a} <span class="sr">to </span>${icon('arrow-right')} ${b}</span>`;
 const normSeat = s => String(s || '').toUpperCase().replace(/\s+/g, '');
 // "Seats" when there is more than one seat or more than one traveller in the Wallet.
 const pax = () => { try { const w = N.wallet() || {}; return Array.isArray(w.names) ? w.names.filter(n => String(n || '').trim()).length : 0; } catch (e) { return 0; } };
 const seatWord = l => l.seats.length > 1 || pax() > 1 ? 'Seats' : 'Seat';
-const dotCls = tone => tone === 'ok' ? '' : tone === 'neutral' ? 'neutral' : 'warn';
+// Dot colour by tone: amber for caution, rose only for a real problem.
+const dotCls = tone => tone === 'ok' ? '' : tone === 'neutral' ? 'neutral' : tone === 'warn' ? 'amb' : 'bad';
 const chipCls = tone => tone === 'bad' ? 'rose' : tone === 'warn' ? 'warn' : '';
 
 // The aircraft for a leg: guide entry (by code) plus a short display name.
@@ -80,9 +83,9 @@ const levelTone = c => !c ? 'neutral' : cxDone(c) ? 'neutral' : cxMade(c) || c.l
 const nowMs = () => N.now().getTime();
 // Checks can go quiet (no signal, updater asleep). A leg still "scheduled" 20+ min after
 // its departure time has almost certainly left, so stop showing its gate and boarding time.
-const dueGone = l => !!(l && l.state === 'scheduled' && !l.canceled && okT(l.dep && l.dep.time) && nowMs() > T(l.dep.time) + 20 * 60000);
+const dueGone = l => !!(l && N.lagging(l));
 // ...and once its arrival time has passed too, it should be on the ground.
-const dueDown = l => dueGone(l) && okT(l.arr && l.arr.time) && nowMs() >= T(l.arr.time);
+const dueDown = l => !!l && N.lagging(l) === 'down';
 const isGone = l => !!l && (['air', 'landed', 'past'].includes(l.state) || dueGone(l));
 // A per-leg stamp that changes whenever what we show for the leg should change.
 const stamp = l => l ? `${l.state}${l.state === 'landed' && okT(l.arr && l.arr.time) && nowMs() - T(l.arr.time) >= 90 * 60000 ? '+' : ''}${dueDown(l) ? '>' : dueGone(l) ? '~' : ''}${l.state === 'boarding' && okT(l.doors) && nowMs() >= T(l.doors) ? 'd' : ''}` : '';
@@ -97,20 +100,19 @@ function unconfText(names, ymd, ap) {
   return `AA hasn’t published times for ${names} ${day}.${soon} Your booking in the AA app or on aa.com has the times you were sold.`;
 }
 
-// N.legStatus, except a leg well past its arrival with no landing seen reads "Done",
-// and one that went quiet after its departure time says where it should be.
-const legSt = l => {
-  if (l && l.state === 'past' && !l.canceled && !l.diverted && l.route_ok !== false) return {text: 'Done', tone: 'neutral'};
-  if (dueGone(l) && l.route_ok !== false) return {text: dueDown(l) ? 'Likely landed' : 'Likely in the air', tone: 'neutral'};
-  if (l && !l.dep.time && !l.canceled && l.route_ok !== false && dayDiff(l.date, l.from) < 0) return {text: 'No times saved', tone: 'neutral'};
-  return N.legStatus(l);
-};
+// N.legStatus (which already says "Done" and "Likely in the air"), except a leg whose day
+// went by with no times at all.
+const legSt = l => l && !l.dep.time && !l.canceled && l.route_ok !== false && dayDiff(l.date, l.from) < 0
+  ? {text: 'No times saved', tone: 'neutral'} : N.legStatus(l);
 // Its day went by and no times ever came through: talk about it in the past, not "yet".
 const lapsed = l => !!(l && !l.dep.time && !l.canceled && dayDiff(l.date, l.from) < 0);
-// Status chip, e.g. "On time · checked 4:31a".
+// Core's stale/offline strip is up: it already says when flights were checked.
+const stripOn = () => { const f = N.fresh(); return (typeof N.unlocked !== 'function' || N.unlocked())
+  && ((typeof N.online === 'function' && !N.online()) || (f.level === 'stale' && !!(f.window || f.hot))); };
+// Status chip, e.g. "On time · checked 4 min ago" (no "checked" while the strip says it).
 function statusChip(l, withChecked, cls = '') {
   const s = legSt(l);
-  const chk = withChecked && l.checked_at ? ` · checked ${when(l.checked_at, l.from)}` : '';
+  const chk = withChecked && l.checked_at && !stripOn() ? h` · checked <span data-ago="${l.checked_at}">${N.ago(l.checked_at)}</span>` : '';
   return h`<span class="chip ${chipCls(s.tone)} ${cls}" data-k="st-${l.id}"><span class="dot ${dotCls(s.tone)}"></span>${s.text}${chk}</span>`;
 }
 const changesFor = id => { try { return N.changes().filter(c => c.leg.id === id); } catch (e) { return []; } };
@@ -149,16 +151,16 @@ function heroList(ctx) {
   }
   // For a while after the last flight of a direction lands, the hero is about that arrival.
   const landed = justIn();
-  // The check time reads in the zone of the leg the hero is about, as on that leg's page.
-  const fz = landed ? landed.from : next ? next.from : f.window === 'ret' ? 'LGA' : 'PHX';
-  // When the stale/offline strip is up it already says when flights were checked; one message is enough.
-  const stripOn = (typeof N.unlocked !== 'function' || N.unlocked())
-    && ((typeof N.online === 'function' && !N.online()) || (f.level === 'stale' && !!(f.window || f.hot)));
-  const fresh = stripOn ? '' : h`<span class="chip ob"><span class="dot ${f.level === 'fresh' ? '' : f.level === 'neutral' ? 'neutral' : 'stale'}"></span>${f.at ? `Checked ${when(f.at, fz)}` : f.text}</span>`;
+  // One freshness line, worded as core's strip. While the strip is up it says it; outside the
+  // travel window old data is no risk, so a neutral dot and a Refresh button, never rose.
+  const chk = f.at ? h`Checked <span data-ago="${f.at}">${N.ago(f.at)}</span>` : 'Not checked yet';
+  const fresh = stripOn() ? '' : f.level === 'stale'
+    ? h`<button class="chip ob fl-ref" data-act="refresh"><span class="dot neutral"></span>${chk} · <b>${f.at ? 'Refresh' : 'Check now'}</b></button>`
+    : h`<span class="chip ob"><span class="dot ${f.level === 'fresh' ? '' : 'neutral'}"></span>${chk}</span>`;
   if (!all.length) {
     ey = 'Flights'; line = h`<b>No flights saved</b> on this phone yet`;
   } else if (landed) {
-    ey = `${fno(landed)} · ${landed.from} → ${landed.to}`;
+    ey = h`${fno(landed)} · ${pair(landed.from, landed.to)}`;
     line = h`<b>Landed</b> in ${city(landed.to)} at <b class="tn">${N.time(landed.arr.time, landed.to)}</b>.${landed.arr.baggage
       ? h` Bags on <b data-k="hbag">carousel ${landed.arr.baggage}</b>.` : ''}`;
   } else if (!next) {
@@ -166,32 +168,31 @@ function heroList(ctx) {
   } else if (!next.dep.time) {
     const dd = dayDiff(next.date, next.from);
     const what = next.dir === 'out' ? 'The flight to New York' : 'The flight home';
-    ey = `${dd < 0 ? '' : 'Next · '}${fno(next)} · ${dayLong(next.date)}`;
+    ey = `${dd < 0 ? '' : 'Next · '}${fno(next)}`;
     line = dd < 0 ? h`${what} was on <b>${dayLong(next.date)}</b>. No times came through.`
-      : dd === 0 ? h`${what} is <b>today</b>. Times not confirmed yet.`
-      : h`${N.dirLabel(next.dir)} on <b>${dayLong(next.date)}</b>. Times not confirmed yet.`;
+      : h`${what} is <b>${dd === 0 ? 'today' : dd === 1 ? 'tomorrow' : `in ${dd} days`}</b>. Times not confirmed yet.`;
   } else if (next.state === 'air') {
-    ey = `${fno(next)} · ${next.from} → ${next.to}`;
+    ey = h`${fno(next)} · ${pair(next.from, next.to)}`;
     line = h`In the air. Lands in ${city(next.to)} in <b class="tn"><span data-until="${next.arr.time}">${N.until(next.arr.time)}</span></b>`;
   } else if (next.state === 'boarding') {
-    ey = `${fno(next)} · ${next.from} → ${next.to}`;
+    ey = h`${fno(next)} · ${pair(next.from, next.to)}`;
     const gate = next.dep.gate ? h` from gate <b>${next.dep.gate}</b>` : '';
     line = okT(next.doors) && T(next.doors) <= now
       ? h`${T(next.dep.time) > now ? 'Leaving' : 'Due to have left'}${gate} at <b class="tn">${N.time(next.dep.time, next.from)}</b>.`
       : h`<b>Boarding now</b>${next.dep.gate ? h` at gate <b>${next.dep.gate}</b>` : ''}. Doors close ${N.time(next.doors, next.from)}.`;
   } else if (next.canceled) {
-    ey = `${fno(next)} · ${next.from} → ${next.to}`;
+    ey = h`${fno(next)} · ${pair(next.from, next.to)}`;
     line = h`<b>${fno(next)} is canceled.</b> Check the AA app for your new flight.`;
   } else if (next.diverted) {
-    ey = `${fno(next)} · ${next.from} → ${next.to}`;
+    ey = h`${fno(next)} · ${pair(next.from, next.to)}`;
     line = h`<b>${fno(next)} diverted to ${next.diverted}.</b> Stay with the plane; the AA app shows the new plan.`;
   } else if (T(next.dep.time) <= now) {
-    ey = `${fno(next)} · ${next.from} → ${next.to}`;
+    ey = h`${fno(next)} · ${pair(next.from, next.to)}`;
     line = !next.arr.time ? h`Due to have left ${city(next.from)}. Waiting for the next check.`
       : T(next.arr.time) <= now ? h`Due to have landed in ${city(next.to)} at <b class="tn">${N.time(next.arr.time, next.to)}</b>. Waiting for the next check.`
       : h`Due to have left ${city(next.from)}. Lands in ${city(next.to)} around <b class="tn">${N.time(next.arr.time, next.to)}</b>`;
   } else if (via && okT(next.board) && T(next.board) > now) {
-    ey = `Connection · ${fno(next)} · ${next.from} → ${next.to}`;
+    ey = h`Connection · ${fno(next)} · ${pair(next.from, next.to)}`;
     line = h`Change planes in ${city(next.from)}. ${fno(next)} boards in <b class="tn"><span data-until="${next.board}">${N.until(next.board)}</span></b>`;
   } else {
     // A countdown, worded so it can't be read as the flight's length.
@@ -241,6 +242,8 @@ function ticket(l, i, n) {
   const lateCls = (est, sched) => est && sched && N.mins(sched, est) >= 5 ? 'late' : '';
   const unknown = !l.dep.time;
   const label = `${fno(l)}, ${l.from} to ${l.to}, ${s.text}`;
+  // "Seat: Not added" means nothing once the leg has flown.
+  const seatCell = l.seats.length || !(isGone(l) || lapsed(l));
   return h`<a class="fl-tk rise ${l.canceled ? 'bad' : ''}" href="#flight/${l.id}" style="animation-delay:${i * 60}ms" aria-label="${label}">
     <div class="fl-top"><span class="fl-no">${fno(l)}<span class="mu"> · Leg ${l.seq || i + 1} of ${n}</span></span>${statusChip(l)}</div>
     <div class="fl-mid">
@@ -258,9 +261,9 @@ function ticket(l, i, n) {
         <small>${city(l.to)}${l.arr.time && tzAbbr(l.to, l.arr.time) ? ' · ' + tzAbbr(l.to, l.arr.time) : ''}</small>
       </div>
     </div>
-    <div class="fl-meta">
+    <div class="fl-meta ${seatCell ? '' : 'two'}">
       <div><small>Gate${term ? ' · ' + term : ''}</small><b data-k="dg-${l.id}">${gate || '—'}</b></div>
-      <div><small>${seatWord(l)}</small><b class="${l.seats.length ? '' : 'mu'}">${l.seats.length ? l.seats.join(' ') : 'Not added'}</b></div>
+      ${seatCell ? h`<div><small>${seatWord(l)}</small><b class="${l.seats.length ? '' : 'mu'}">${l.seats.length ? l.seats.join(' ') : 'Not added'}</b></div>` : ''}
       <div><small>Aircraft</small><b class="${p.short ? '' : 'mu'}">${p.short || 'Not known'}</b></div>
     </div>
   </a>`;
@@ -280,6 +283,8 @@ const cxLevel = c => cxMade(c) ? 'ok' : cxDone(c) ? 'neutral' : c ? c.level : 'n
 
 // Tint for the connection row and chip: rose only when it is at risk (or the plan fell through).
 const cxCls = c => !c ? 'neutral' : cxBad(c) ? 'risk' : cxLevel(c);
+// The one phrase for a walk with a gate still missing, as on Today: "about 15 min to walk until the gate posts".
+const posts = (ag, bg) => !ag && !bg ? 'until the gates post' : 'until the gate posts';
 const spareText = c => c.spare >= 0 ? `${c.spare} min to spare` : `${-c.spare} min short`;
 
 // One connection row, used between the tickets (#flights) and on each leg's page (#flight/<leg>).
@@ -292,7 +297,7 @@ function cxRow(dir, legs, l) {
   if (!c) {
     const old = legs.some(lapsed);
     title = `Change in ${city(at)}`;
-    sub = old ? 'No connection times came through' : 'Times not published yet';
+    sub = old ? 'No connection times came through' : 'Times not confirmed yet';
   } else {
     title = h`Change in ${city(at)} · <span class="tn">${N.dur(c.ground)}</span>`;
     const lv = h`<span class="cx-lv">${cxText(c)}</span>`;
@@ -339,13 +344,13 @@ function dirSection(dir, done) {
   const ci = checkin(legs);
   const tzD = tzAbbr(first.from, first.dep.time), tzA = tzAbbr(last.to, last.arr.time);
   const head = h`<div class="fl-dh"><div class="grow"><div class="ey">${dir === 'out' ? 'Outbound' : 'Return'} · ${dayLong(first.date)}</div>
-      <h2 class="h2">${N.dirLabel(dir)}</h2></div>${done ? h`<span class="chip cr">${icon('check')}Done</span>` : ''}</div>`;
+      <h2 class="h2">${N.dirLabel(dir)}</h2></div>${done ? h`<span class="fl-done">${icon('circle-check')}Done</span>` : ''}</div>`;
   // Before AA publishes any times, one card says so once instead of a row of dashes and TBCs.
   const waiting = !done && !legs.some(l => l.dep.time) && !legs.some(l => lapsed(l) || l.canceled || l.diverted || l.route_ok === false);
   if (waiting) {
     return h`<section class="sec fl-dir">${head}
       <a class="fl-tbc rise" href="#flight/${first.id}"><span class="ic">${icon('calendar-time')}</span><div class="grow">
-        <b>${legs.map(fno).join(' + ')}${via ? ` via ${via}` : ''}</b><small>Times not published yet</small></div>${icon('chevron-right')}</a>
+        <b>${legs.map(fno).join(' + ')}${via ? ` via ${via}` : ''}</b><small>Times not confirmed yet</small></div>${icon('chevron-right')}</a>
     </section>`;
   }
   return h`<section class="sec fl-dir ${done ? 'done' : ''}">
@@ -459,6 +464,8 @@ function arrivalRow(l, legs) {
   const last = l.id === legs[legs.length - 1].id;
   // A canceled or diverted flight won't arrive here as planned; the banner says what to do.
   if (!last || l.canceled || l.diverted) return '';
+  // Down (or due down): the arrival-gate and Bags tiles above already say it.
+  if (isGone(l) && l.state !== 'air' && !(dueGone(l) && !dueDown(l))) return '';
   const term = termLabel(l.arr.terminal);
   const where = [term, l.arr.gate ? `Gate ${l.arr.gate}` : ''].filter(Boolean).join(' · ');
   if (l.arr.baggage) {
@@ -493,8 +500,9 @@ function timesGrid(l) {
   else pos = 6;
   const tzD = tzAbbr(l.from, l.dep.time || l.date + 'T16:00:00Z'), tzA = tzAbbr(l.to, l.arr.time || l.date + 'T16:00:00Z');
   const off = l.canceled && !l.dep.actual;
-  const depWord = off ? 'Was to leave' : l.dep.actual ? 'Took off' : l.dep.est && depOld ? 'Now' : 'Departs';
-  const arrWord = off || div ? 'Was to land' : l.arr.actual ? 'Landed' : l.arr.est && arrOld ? 'Now' : 'Arrives';
+  // A moved time reads "<s>12:00p</s> Estimated" over the new one, never "Now".
+  const depWord = off ? 'Was to leave' : l.dep.actual ? 'Took off' : l.dep.est && depOld ? 'Estimated' : 'Departs';
+  const arrWord = off || div ? 'Was to land' : l.arr.actual ? 'Landed' : l.arr.est && arrOld ? 'Estimated' : 'Arrives';
   return h`<div class="fx-times ${off ? 'off' : ''}">
     <div><small class="fx-tw">${depOld ? h`<s class="tn">${depOld}</s> ` : ''}${depWord}</small><div class="tn fx-t" data-k="dt-${l.id}">${l.dep.time ? N.time(l.dep.time, l.from) : '—'}</div><small class="fx-tz">${l.from}${tzD ? ' · ' + tzD : ''}</small></div>
     <div class="fx-mid" aria-hidden="true"><div class="fx-dash"><span style="left:${pos.toFixed(1)}%">${icon('plane-inflight')}</span></div><small class="tn">${dur}</small></div>
@@ -519,12 +527,24 @@ function tiles(l, ch) {
     ? h`<a class="tile fx-tl" href="#seats/${l.id}"><small>Aircraft</small><b>${p.short || p.code}</b><small class="fx-ln">Seat map ${icon('chevron-right')}</small></a>`
     : h`<div class="tile"><small>Aircraft</small><b class="mu">—</b><small>${lapsed(l) ? 'Not recorded' : 'Not known yet'}</small></div>`;
   const aTerm = termLabel(l.arr.terminal);
+  // Once the leg has left, the times row above says when; the second tile says what comes next:
+  // the walk to the onward gate, the time left in the air, or the carousel at the last stop.
+  const ls = legsOf(l.dir), nx = ls[ls.findIndex(x => x.id === l.id) + 1];
+  let after;
+  if (nx && !nx.canceled && !isGone(nx)) {
+    const c = conn(l.dir), w = c ? c.walk : N.walk(l.to, l.arr.gate, nx.dep.gate);
+    after = h`<a class="tile fx-tl" href="#connect/${l.dir}"><small>Walk to ${nx.dep.gate ? `gate ${nx.dep.gate}` : 'next gate'}</small><b class="tn">${w.known ? '' : '~'}${w.min}\u00a0min</b><small class="fx-ln">Connection ${icon('chevron-right')}</small></a>`;
+  } else if ((l.state === 'air' || dueGone(l) && !over) && okT(l.arr.time) && T(l.arr.time) > nowMs()) {
+    after = h`<div class="tile"><small>Lands in</small><b class="tn"><span data-until="${l.arr.time}">${N.until(l.arr.time)}</span></b><small>${shortAp(l.to)}</small></div>`;
+  } else {
+    after = h`<div class="tile"><small>Bags</small><b data-k="bg-${l.id}">${l.arr.baggage ? `Carousel ${l.arr.baggage}` : '—'}</b><small>${l.arr.baggage ? shortAp(l.to) : l.state === 'landed' ? 'Carousel not posted yet' : 'Not recorded'}</small></div>`;
+  }
   const first = l.diverted && !l.canceled && l.dep.actual && !l.arr.actual
     ? h`<div class="tile ring"><small>Diverted to</small><b>${l.diverted}</b><small>${city(l.diverted) !== l.diverted ? city(l.diverted) : `Instead of ${l.to}`}</small></div>
       <div class="tile"><small>Took off</small><b class="tn">${l.dep.time ? N.time(l.dep.time, l.from) : '—'}</b><small>${l.from}${tzAbbr(l.from, l.dep.time) ? ' · ' + tzAbbr(l.from, l.dep.time) : ''}</small></div>`
     : gone
     ? h`<div class="tile ${gateRing ? 'ring' : ''}"><small>${l.to} gate${aTerm ? ' · ' + aTerm : ''}</small><b data-k="ag-${l.id}">${l.arr.gate || '—'}</b><small>${l.arr.gate ? concourse(l.to, l.arr.gate) || 'Arrival gate' : l.state === 'past' ? 'Not recorded' : over ? 'Not known' : 'Not posted yet'}</small></div>
-      <div class="tile"><small>${l.arr.actual ? 'Landed' : l.state === 'air' ? 'Lands' : l.state === 'landed' ? 'Arrived' : over ? 'Was due' : 'Due to land'}</small><b class="tn">${l.arr.time ? N.time(l.arr.time, l.to) : '—'}</b><small class="tn">${l.dep.actual && l.dep.time ? `Took off ${N.time(l.dep.time, l.from)}` : l.to}</small></div>`
+      ${after}`
     : l.canceled
     ? h`<div class="tile fx-off"><small>Gate${term ? ' · ' + term : ''}</small><b data-k="dg-${l.id}">${l.dep.gate || '—'}</b><small>${l.dep.gate ? 'Was the gate' : 'No gate'}</small></div>
       <div class="tile fx-off"><small>Boards</small><b>—</b><small>Not boarding</small></div>`
@@ -556,7 +576,8 @@ N.screen('flight', {
     const onward = !last && legs[idx + 1];
     // Plain words for where this leg fits: "<from> to <via>, then <next flight> to <city>".
     const lede = `${city(l.from)} to ${city(l.to)}${onward ? `, then ${fno(onward)} to ${city(onward.to)}` : ''}`;
-    const guides = [l.from, l.to].filter(c => N.guideFor(c));
+    // The airport you're headed for leads once the leg has left.
+    const guides = (isGone(l) ? [l.to, l.from] : [l.from, l.to]).filter(c => N.guideFor(c));
     const hero = h`<div class="fx-h">
       <div class="ey">${N.dirLabel(l.dir)} · ${fno(l)} · Leg ${idx + 1} of ${legs.length}</div>
       <div class="fx-codes" aria-label="${l.from} to ${l.to}">
@@ -697,12 +718,13 @@ function guidance(dir, legs, c, bad) {
   }
   rows.push(['door', gateT, gateS]);
   const w = bad ? N.walk(at, null, null) : c ? c.walk : N.walk(at, ag, bg);
-  const wT = w.known ? (w.same ? `Same concourse, about ${w.min} min` : `About ${w.min} min on foot`) : 'Plan on about 15 min walking';
+  const wT = w.known ? (w.same ? `Same concourse, about ${w.min}\u00a0min` : `About ${w.min}\u00a0min on foot`) : `About ${w.min}\u00a0min to walk`;
   const wS = w.known
     ? `${gateLetter(ag)} to ${gateLetter(bg)}${w.same ? '' : ' through the Atrium'}. There’s no train; it’s all walking.`
-    : `${bad ? 'Until you know your new gate.' : 'Until both gates post.'} All concourses connect through the Atrium; there’s no train.`;
+    : `${bad ? 'Until you know your new gate.' : `${posts(ag, bg).replace(/^u/, 'U')}.`} All concourses connect through the Atrium; there’s no train.`;
   rows.push(['walk', wT, wS]);
-  const food = foodNear(at, bad ? null : bg);
+  // Once boarding starts there's no time to eat; the food row would only distract.
+  const food = okT(b.board) && nowMs() >= T(b.board) ? [] : foodNear(at, bad ? null : bg);
   if (food.length) {
     rows.push(['tools-kitchen-2', bg && !bad ? `Food near ${gateLetter(bg) ? 'Concourse ' + gateLetter(bg) : 'the gate'}` : 'Food on the way',
       food.map(f => `${f.name}${f.where ? ` (${f.where})` : ''}`).join(' · ') + '. Find the gate first, then eat.']);
@@ -744,24 +766,27 @@ N.screen('connect', {
     const lvCls = tone === 'bad' ? 'rose' : tone === 'warn' ? 'amb' : '';
     const hero = h`<div class="cx-h ${hub ? 'has-hub' : ''}">${hub ? hubSvg(a.arr.gate, b.dep.gate) : ''}
       <div class="ey">Connect · ${city(at)}</div>
-      <div class="cx-big ${bad && c ? 'was' : ''}">${c ? h`<span class="dp tn" data-k="cx-min">${Math.max(0, c.ground)}</span><span class="dp cx-u">min</span>` : h`<span class="dp cx-unk" data-k="cx-min" aria-label="Minutes not known yet">?</span><span class="dp cx-u">min</span>`}</div>
+      <div class="cx-big ${bad && c ? 'was' : ''} ${c && c.ground >= 60 ? 'hm' : ''}">${c ? h`<span class="cx-gt" data-k="cx-min" aria-label="${N.dur(Math.max(0, c.ground))} on the ground">${[...N.dur(Math.max(0, c.ground)).matchAll(/(\d+)\s*([a-z]+)/g)].map(([, n, u]) => h`<span class="dp tn">${n}</span><span class="dp cx-u">${u}</span>`)}</span>` : h`<span class="dp cx-unk" data-k="cx-min" aria-label="Minutes not known yet">?</span><span class="dp cx-u">min</span>`}</div>
       <span class="chip ${lvCls} cx-lvl"><span class="dot ${tone === 'warn' ? 'amb' : dotCls(tone)}"></span>${bad ? (a.diverted && !a.canceled ? 'Diverted' : 'Canceled') : c ? cxText(c) : old ? 'No times saved' : 'Times not confirmed'}</span>
     </div>`;
     // On the ground with the onward flight still ahead: say what is happening now.
-    let live = '';
-    // Checks gone quiet past the landing time count too, worded as what should be true.
-    if (!bad && !done && (a.state === 'landed' || dueDown(a)) && b.dep.time) {
+    let live = '', liveCls = '';
+    // Checks gone quiet past the landing time (or long past it) count too, worded as what should be true.
+    if (!bad && !done && (a.state === 'landed' || a.state === 'past' || dueDown(a)) && b.dep.time) {
       const n = nowMs(), gate = b.dep.gate;
-      const lead = a.state === 'landed' ? 'You’re on the ground.' : `${fno(a)} should be on the ground by now.`;
-      if (okT(b.board) && n < T(b.board)) live = h`${lead} ${fno(b)} boards${gate ? ` at ${gate}` : ''} in <b class="tn"><span data-until="${b.board}">${N.until(b.board)}</span></b>, at ${N.time(b.board, at)}.`;
-      else if (okT(b.doors) && n < T(b.doors)) live = h`${fno(b)} is boarding now${gate ? ` at ${gate}` : ''}. Doors close at <b class="tn">${N.time(b.doors, at)}</b>.`;
+      const lead = a.state === 'landed' ? 'You’re on the ground.' : `${fno(a)} should be on the ground.`;
+      if (okT(b.board) && n < T(b.board)) live = h`<b>${lead}</b> <span class="nw">${fno(b)} boards${gate ? ` at ${gate}` : ''}</span> in <b class="tn"><span data-until="${b.board}">${N.until(b.board)}</span></b>, at <span class="nw">${N.time(b.board, at)}.</span>`;
+      else if (okT(b.doors) && n < T(b.doors)) {
+        live = h`<b>Boarding now${gate ? ` at ${gate}` : ''}.</b> <span class="nw">Doors close at ${N.time(b.doors, at)},</span> <span class="nw">in <b class="tn"><span data-until="${b.doors}">${N.until(b.doors)}</span></b>.</span>`;
+        liveCls = c && c.level === 'risk' ? 'rose' : 'cx-warn';
+      }
     }
     let top;
     if (c) {
       const toDoor = N.mins(a.arr.time, b.doors);
       // The hero already shows the minutes on the ground; this line is the slack at the gate.
       const sum = toDoor <= 0 ? `${fno(a)} lands after ${fno(b)}’s doors close` : c.spare >= 0 ? `${c.spare} min to spare at the gate` : `About ${-c.spare} min short at the gate`;
-      const how = `Allows ~10 min to get off and ~${c.walk.min} min to walk${c.walk.known ? '' : ' until the gates post'}.`
+      const how = `Allows about 10\u00a0min to get off and about ${c.walk.min}\u00a0min to walk${c.walk.known ? '' : ` ${posts(a.arr.gate, b.dep.gate)}`}.`
         + (c.free < 0 && c.spare > 0 ? ' Boarding will have started when you get there.' : '')
         + (c.spare < 0 && toDoor > 0 ? ' Tell the crew about your connection as you land.' : '');
       top = h`<div class="cx-sum tn">${bad ? 'Planned: ' : ''}${sum}</div>
@@ -780,14 +805,19 @@ N.screen('connect', {
     const alert = bad ? h`<div class="bn cx-bn">${icon('alert-triangle')}<div class="grow"><b>${a.canceled ? `${fno(a)} is canceled` : b.canceled ? `${fno(b)} is canceled` : `${fno(a)} diverted to ${a.diverted}`}</b>
       <span>AA rebooks missed connections automatically. Check the AA app for your new flight before walking to a gate.</span></div></div>` : '';
     // Verb tense follows where the flight is, so a landed or gone flight doesn't read as still to come.
-    const legRow = (l, word) => h`<a class="fx-row fx-go" href="#flight/${l.id}"><span class="ic">${icon(word === 'in' ? 'plane-arrival' : 'plane-departure')}</span><div class="grow">
-      <b>${fno(l)} · ${l.from} → ${l.to}</b><small class="tn">${lapsed(l) ? [dayLong(l.date), legSt(l).text].filter(Boolean).join(' · ') : word === 'in'
-        ? `${l.canceled || l.diverted ? 'Was to land' : l.state === 'landed' ? 'Landed' : l.state === 'past' || dueDown(l) ? 'Was due' : 'Lands'} ${l.arr.time ? N.time(l.arr.time, at) : 'time TBC'}${l.arr.gate ? ` · gate ${l.arr.gate}` : ''}`
-        : l.canceled ? `Was to leave ${l.dep.time ? N.time(l.dep.time, at) : 'TBC'}${l.dep.gate ? ` · gate ${l.dep.gate}` : ''}`
-        : isGone(l) ? `Left ${l.dep.time ? N.time(l.dep.time, at) : 'TBC'}${l.dep.gate ? ` · gate ${l.dep.gate}` : ''}`
-        : `Boards ${l.board ? N.time(l.board, at) : 'time TBC'} · departs ${l.dep.time ? N.time(l.dep.time, at) : 'TBC'}${l.dep.gate ? ` · gate ${l.dep.gate}` : ''}`}${lapsed(l) || (word === 'in' && l.state === 'landed' && legSt(l).text === 'Landed') ? '' : ` · ${legSt(l).text}`}</small></div>${icon('chevron-right')}</a>`;
+    const legRow = (l, word) => {
+      const tm = t => t ? N.time(t, at) : 'TBC', dg = l.dep.gate ? `gate ${l.dep.gate}` : '';
+      const parts = lapsed(l) ? [dayLong(l.date), legSt(l).text] : word === 'in'
+        ? [`${l.canceled || l.diverted ? 'Was to land' : l.state === 'landed' ? 'Landed' : l.state === 'past' || dueDown(l) ? 'Was due' : 'Lands'} ${tm(l.arr.time)}`, l.arr.gate ? `gate ${l.arr.gate}` : '']
+        : l.canceled ? [`Was to leave ${tm(l.dep.time)}`, dg]
+        : isGone(l) ? [`Left ${tm(l.dep.time)}`, dg]
+        : [`Boards ${tm(l.board)}`, `departs ${tm(l.dep.time)}`, dg];
+      if (!lapsed(l) && !(word === 'in' && l.state === 'landed' && legSt(l).text === 'Landed')) parts.push(legSt(l).text);
+      return h`<a class="fx-row fx-go" href="#flight/${l.id}"><span class="ic">${icon(word === 'in' ? 'plane-arrival' : 'plane-departure')}</span><div class="grow">
+        <b>${fno(l)} · ${pair(l.from, l.to)}</b><small class="tn">${parts.filter(Boolean).map((p, i) => h`${i ? ' · ' : ''}<span class="nw">${p}</span>`)}</small></div>${icon('chevron-right')}</a>`;
+    };
     return {hero, body: h`<div class="cx">
-      ${alert}${live ? h`<div class="co cx-now">${icon('clock')}<span>${live}</span></div>` : ''}${top}
+      ${alert}${live ? h`<div class="co cx-now ${liveCls}">${icon('clock')}<span>${live}</span></div>` : ''}${top}
       ${done ? h`<div class="sec"><div class="co plain">${icon('circle-check')}<span>${cxMade(c)
         ? `You made this connection. ${fno(b)} left ${city(at)}${b.dep.time ? ` at ${N.time(b.dep.time, at)}` : ''}.`
         : 'This connection is behind you, going by the schedule. No landing or departure came through, so the times above are as planned.'}</span></div></div>` : old ? '' : guidance(dir, legs, c, bad)}
@@ -869,7 +899,7 @@ N.screen('seats', {
     (info && info.avoid || []).forEach(t => { const s = seatRefs(t); s.forEach(x => avoid.add(x)); avoidWhy.push([s, t]); });
     const swapped = l.live && l.aircraft_code && l.planned_code && l.aircraft_code !== l.planned_code;
     const hero = h`<div class="st-h">
-      <div class="ey">Seat map · ${fno(l)} · ${l.from} → ${l.to}</div>
+      <div class="ey">Seat map · ${fno(l)} · ${pair(l.from, l.to)}</div>
       <h1 class="hl">${p.maker ? h`${p.maker} ` : ''}<b>${p.short || 'Aircraft not known'}</b></h1>
       ${info && info.config ? h`<p class="st-cfg">${info.config}</p>` : ''}
     </div>`;
@@ -944,20 +974,6 @@ N.screen('seats', {
       <div class="sec wrap">${ext(info.map_url || l.seatmap, 'Full seat map', 'cr2')}</div>
     </div>`};
   },
-  // Open at your row, once per visit (a data refresh keeps wherever you scrolled to).
-  mount(ctx, view) {
-    const cur = typeof N.current === 'function' ? N.current() : null;
-    if (!view || cur && cur.stJumped) return null;
-    if (cur) cur.stJumped = true;
-    // After the router has set its own scroll; coming back to a spot you scrolled to keeps it.
-    const t = setTimeout(() => {
-      const row = view.querySelector('.st-row.mine');
-      if (!row || view.scrollTop > 4) return;
-      const r = row.getBoundingClientRect();
-      if (r.top >= 80 && r.bottom <= innerHeight - 120) return;
-      try { row.scrollIntoView({block: 'center', behavior: N.reduce ? 'auto' : 'smooth'}); } catch (e) { row.scrollIntoView(); }
-    }, 0);
-    return () => clearTimeout(t);
-  },
+  // No jump to your row: the page opens on which flight this is, your seats and the key; the map follows.
 });
 })();

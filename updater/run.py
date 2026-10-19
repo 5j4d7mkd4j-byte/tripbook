@@ -28,6 +28,8 @@ Steps:
   5. Assemble schema v1 with run.cadence_s (60 | 600 | 3600: how often the cloud
      checks now) and run.hot_until, validate it, write updater/out/status.json,
      seal it to updater/out/status.bin and keep a plaintext copy in updater/state.
+     Just before sealing, alerts.step() (updater/alerts.py) pushes what changed to
+     the phones (updater/push.mjs) and keeps its memory in status.alerts.
 updater/publish.sh then pushes status.bin to the live branch (--loop runs it
 itself after every iteration).
 
@@ -53,6 +55,7 @@ ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 sys.dont_write_bytecode = True  # no __pycache__ in the repo
 import flight_status as fs  # noqa: E402  (needs the path above)
+import alerts  # noqa: E402  lock-screen pushes (status.alerts)
 
 TRIPCRYPT = ROOT / "tools" / "tripcrypt.mjs"
 TRIP_BIN = ROOT / "docs" / "data" / "trip.bin"
@@ -519,6 +522,10 @@ def check_schema(doc):
             p.append(f"airports.{code} must be an object")
         elif (a.get("faa") or {}).get("status") not in (None, "normal", "delay", "ground_stop", "closed"):
             p.append(f"airports.{code}.faa.status is not normal|delay|ground_stop|closed")
+    al = doc.get("alerts")
+    if al is not None and not (isinstance(al, dict) and al.get("v") == 1 and isinstance(al.get("sent"), dict)
+                               and isinstance(al.get("seen"), dict) and isinstance(al.get("devices"), list)):
+        p.append("alerts must be {v: 1, sent, seen, devices, last}")
     return p
 
 
@@ -680,6 +687,7 @@ def loop(a, legs, prev, out_dir, state_file, start, remote=None):
     cond_notes = [n for n in (prev.get("run") or {}).get("notes") or [] if str(n).startswith("conditions:")]
     cond_ok, cond_at, thread, box = True, None, None, {}
     end_seen, n, wrote, published, failed_in_row = None, 0, 0, 0, 0
+    alert_state = prev.get("alerts")  # carried minute to minute, even past a failed write
     blind, remote_at = False, start
     while True:
         now = clock().replace(microsecond=0)
@@ -693,6 +701,7 @@ def loop(a, legs, prev, out_dir, state_file, start, remote=None):
             if got_remote and newer(prev, got_remote) is got_remote:
                 say("loop: building on a newer published status")
                 prev = got_remote
+                alert_state = prev.get("alerts")
             now = clock().replace(microsecond=0)  # the read can take a while
         win = hot_window(legs, prev, now, HOT_LEAD)
         if win:
@@ -736,6 +745,9 @@ def loop(a, legs, prev, out_dir, state_file, start, remote=None):
                 counts["carried"] += len(legs) - len(due)
                 notes = [x for l in legs for x in leg_notes.get(l["id"], [])] + cond_notes
                 doc = assemble(prev, now, a.source, legs_doc, counts, notes, cond, cond_ok, legs, looping=True)
+                if not check_schema(doc):
+                    doc["alerts"] = alert_state = alerts.step(dict(prev, alerts=alert_state), doc, legs, now,
+                                                              push=not (a.legs or a.now))
                 write_status(doc, out_dir, state_file)
                 wrote += 1
                 prev = doc
@@ -743,7 +755,8 @@ def loop(a, legs, prev, out_dir, state_file, start, remote=None):
                 published += bool(sent)
                 say(f"loop {n}: cadence {doc['run']['cadence_s']} s; flights "
                     + ", ".join(f"{k} {v}" for k, v in counts.items())
-                    + ("" if sent is None else "; published" if sent else "; publish failed"))
+                    + ("" if sent is None else "; published" if sent else "; publish failed")
+                    + "; " + alerts.summary())
             failed_in_row = 0
         except Exception as e:  # one bad minute must not end the loop; a run of them does
             failed_in_row += 1
@@ -902,6 +915,10 @@ def main():
             box["err"] = "timed out"
     cond, cond_notes, cond_ok = conditions_result(box, prev)
     doc = assemble(prev, now, a.source, legs_doc, counts, notes + cond_notes, cond, cond_ok, legs, looping=False)
+    # Lock-screen alerts, before sealing so their state rides in status.bin. A status that
+    # fails the schema check is never written, so it sends nothing. Test runs never push.
+    if not check_schema(doc):
+        doc["alerts"] = alerts.step(prev, doc, legs, now, push=not (a.legs or a.now))
     try:
         binf = write_status(doc, out_dir, state_file)
     except ValueError as e:
@@ -915,6 +932,7 @@ def main():
     say("flights: " + ", ".join(f"{k} {v}" for k, v in counts.items())
         + f"; conditions {'kept previous' if box.get('err') or box.get('missing') else 'ok'}"
         + f"; {len(doc['run']['notes'])} notes; cadence {doc['run']['cadence_s']} s")
+    say(alerts.summary())
     if not PUBLIC:
         for n in doc["run"]["notes"]:
             say(f"  note: {n}")

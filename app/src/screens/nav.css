@@ -9,8 +9,8 @@
   --na-edge:rgba(22,25,26,.16);--na-corr:rgba(119,153,149,.20);
   --na-gate:#4A706D;--na-gatec:#FDFDFD;
   --na-route:#2F6F69;--na-routec:#FFFFFF;--na-flow:rgba(255,255,255,.95);--na-routet:#2F6F69;
-  --na-hl:#C4686B;--na-me:#2F7FD8;--na-line:#6E8F8B;--na-train:#7A6AA8;--na-road:#CFCAC0;
-  --na-ic:#FFFFFF;--na-vert:#6B5FA6;--na-tight:#C98A22;
+  --na-hl:var(--ink);--na-me:#2F7FD8;--na-line:#6E8F8B;--na-train:#7A6AA8;--na-road:#CFCAC0;
+  --na-ic:#FFFFFF;--na-vert:#6B5FA6;
   position:absolute;inset:0;overflow:hidden;color:var(--ink)
 }
 @media (prefers-color-scheme:dark){
@@ -20,8 +20,8 @@
     --na-edge:rgba(255,255,255,.10);--na-corr:rgba(156,192,188,.16);
     --na-gate:#9CC0BC;--na-gatec:#121514;
     --na-route:#8FC9C2;--na-routec:#0E1211;--na-flow:rgba(14,18,17,.85);--na-routet:#8FC9C2;
-    --na-hl:#E3979A;--na-me:#5AA2F0;--na-line:#7FA39F;--na-train:#A99BD6;--na-road:#2A2F2D;
-    --na-ic:#121514;--na-vert:#A99BD6;--na-tight:#E2B25E
+    --na-me:#5AA2F0;--na-line:#7FA39F;--na-train:#A99BD6;--na-road:#2A2F2D;
+    --na-ic:#121514;--na-vert:#A99BD6
   }
 }
 :root[data-theme="dark"] .na{
@@ -30,8 +30,8 @@
   --na-edge:rgba(255,255,255,.10);--na-corr:rgba(156,192,188,.16);
   --na-gate:#9CC0BC;--na-gatec:#121514;
   --na-route:#8FC9C2;--na-routec:#0E1211;--na-flow:rgba(14,18,17,.85);--na-routet:#8FC9C2;
-  --na-hl:#E3979A;--na-me:#5AA2F0;--na-line:#7FA39F;--na-train:#A99BD6;--na-road:#2A2F2D;
-  --na-ic:#121514;--na-vert:#A99BD6;--na-tight:#E2B25E
+  --na-me:#5AA2F0;--na-line:#7FA39F;--na-train:#A99BD6;--na-road:#2A2F2D;
+  --na-ic:#121514;--na-vert:#A99BD6
 }
 
 /* shell: the map fills everything under the top bar */
@@ -83,14 +83,20 @@
 .na-tc .i,.na-eyb .i{flex:none;font-size:20px;color:var(--mu)}
 .na-eyb{box-sizing:border-box;width:calc(100% + 24px);min-height:44px;margin:-10px -10px -6px -14px;padding:0 10px 0 14px;text-align:left;cursor:pointer}
 .na-cn{display:flex;flex-direction:column;gap:4px;margin:6px 4px 2px 0;padding:9px 11px;border-radius:14px;background:var(--cr)}
-.na-cnt{font-size:16px;font-weight:800;line-height:1.25;letter-spacing:-.01em}
+.na-cnt{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;font-size:16px;font-weight:800;line-height:1.25;letter-spacing:-.01em}
+.na-cnt .i{flex:none;font-size:16px;color:var(--mu)}
 .na-cnb{display:flex;gap:8px;align-items:flex-start;font-size:14px;font-weight:600;line-height:1.35}
 .na-cnb>span{flex:1;min-width:0}
 .na-cnw{font-size:13px;font-weight:600;color:var(--mu);line-height:1.3}
-.na-tone{flex:none;font-style:normal;font-size:13px;font-weight:800;line-height:1.5;padding:0 8px;border-radius:8px;background:var(--ok);color:var(--page)}
-.na-tone.tight{background:var(--na-tight);color:var(--page)}
-.na-tone.risk{background:var(--ro);color:var(--rog)}
-.na-tone.info{background:var(--pill);color:var(--pillt)}
+/* the connection word, as the other screens show it: a green dot when comfortable, an amber ring when
+   tight, rose only when at risk */
+.na-tone{flex:none;display:inline-flex;align-items:center;gap:6px;font-style:normal;font-size:13px;font-weight:800;line-height:1.5;padding:0 8px;
+  border-radius:8px;background:var(--cr);color:var(--ink)}
+.na-tone.ok::before{content:'';flex:none;width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.na-cn .na-tone{background:var(--sheet)}
+.na-tone.tight,.na-cn .na-tone.tight{background:transparent;box-shadow:inset 0 0 0 1.5px var(--warn)}
+.na-tone.risk,.na-cn .na-tone.risk{background:var(--rob);color:var(--robt)}
+.na-tone.info,.na-cn .na-tone.info{background:var(--pill);color:var(--pillt)}
 .na-wr{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px;font-weight:600;line-height:1.3}
 .na-wr>.i{font-size:18px;color:var(--na-me)}
 .na-wt{flex:1;min-width:0}
@@ -116,14 +122,23 @@
   bottom:calc(var(--na-sheeth) + 12px);display:flex;flex-direction:column;justify-content:flex-end;gap:8px;pointer-events:none;transition:opacity .2s}
 .na-rail>*{pointer-events:auto}
 /* on a short screen the floors scroll before anything overlaps */
-.na-fl{flex:0 1 auto;min-height:88px;display:flex;flex-direction:column;background:var(--sheet);border-radius:16px;box-shadow:var(--navs);
+.na-fl{position:relative;flex:0 1 auto;min-height:89px;display:flex;flex-direction:column;background:var(--sheet);border-radius:16px;box-shadow:var(--navs);
   overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
 .na-fl::-webkit-scrollbar{display:none}
+/* nav.js sizes the list to whole buttons; a soft scroll shadow marks the edge with more floors past it */
+.na-fl{--na-fsh:rgba(22,25,26,.16)}
+.na-fl::before,.na-fl::after{content:'';position:sticky;z-index:1;flex:none;height:10px;pointer-events:none;opacity:0;transition:opacity .15s}
+.na-fl::before{top:0;margin-bottom:-10px;background:linear-gradient(var(--na-fsh),transparent)}
+.na-fl::after{bottom:0;margin-top:-10px;background:linear-gradient(transparent,var(--na-fsh))}
+.na-fl.fu::before,.na-fl.fd::after{opacity:1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .na-fl{--na-fsh:rgba(0,0,0,.5)}}
+:root[data-theme="dark"] .na-fl{--na-fsh:rgba(0,0,0,.5)}
 .na-fl:empty{display:none}
 .na-lv{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:var(--mu);position:relative;cursor:pointer}
 .na-lv+.na-lv{border-top:1px solid var(--ln)}
 .na-lv.on{background:var(--ink);color:var(--page)}
-.na-lv.rt::after{content:'';position:absolute;right:6px;top:6px;width:7px;height:7px;border-radius:50%;background:var(--ro)}
+.na-lv.rt::after{content:'';position:absolute;right:6px;top:6px;width:7px;height:7px;border-radius:50%;background:var(--na-route)}
+.na-lv.on.rt::after{background:currentColor}
 .na-ctl{flex:none;display:flex;flex-direction:column;gap:8px}
 .na-fab{width:44px;height:44px;border-radius:14px;background:var(--sheet);color:var(--ink);box-shadow:var(--navs);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer}
 .na-fab.on{color:var(--na-me)}
@@ -144,7 +159,8 @@
 }
 .na.full .na-sh{height:calc(100% - var(--na-strip) - 10px)}
 .na-sh.auto,.na.full .na-sh.auto{height:auto;max-height:calc(100% - var(--na-strip) - var(--na-toph) - 24px)}
-.na-grab{flex:none;display:flex;align-items:center;justify-content:center;height:44px;width:100%;cursor:pointer;touch-action:none}
+/* 44px to grab, the top 8px of it over the map edge, so the sheet's own content starts closer to the handle */
+.na-grab{flex:none;display:flex;align-items:center;justify-content:center;height:44px;width:100%;margin-top:-8px;cursor:pointer;touch-action:none}
 .na-grab i{display:block;width:40px;height:5px;border-radius:3px;background:var(--gh)}
 .na-sh.auto .na-grab{pointer-events:none}
 .na-sh.auto .na-grab i{opacity:.5}
@@ -205,8 +221,8 @@
 .na-cb{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;gap:3px}
 .na-card.on{border-color:var(--na-hl);background:var(--sheet);box-shadow:0 4px 14px rgba(0,0,0,.10)}
 .na-ci{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:21px;flex:none;background:var(--na-route);color:var(--na-ic)}
-.na-ci.k-arrive,.na-ci.k-via{background:var(--ro);color:var(--rog)}
-.na-ci.k-security{background:var(--rob);color:var(--robt)}
+.na-ci.k-arrive,.na-ci.k-via{background:var(--ink);color:var(--page)}
+.na-ci.k-security{background:var(--warn);color:var(--page)}
 .na-ci.k-vert{background:var(--na-vert);color:var(--na-ic)}
 .na-ci.k-train{background:var(--na-train);color:var(--na-ic)}
 .na-ct{font-size:16px;font-weight:700;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -268,7 +284,8 @@
 .na-pin{display:flex;align-items:center;gap:6px}
 .na-pin.lf{flex-direction:row-reverse}
 .na-pin i{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;font-style:normal;font-size:18px;
-  background:var(--ro);color:var(--rog);box-shadow:0 0 0 3px var(--sheet),0 3px 10px rgba(0,0,0,.3)}
+  background:var(--ink);color:var(--page);box-shadow:0 0 0 3px var(--sheet),0 3px 10px rgba(0,0,0,.3)}
+.na.risk .na-pin.b i{background:var(--ro);color:var(--rog)}
 .na-pin.a i{width:22px;height:22px;margin:5px;background:var(--sheet);box-shadow:inset 0 0 0 6px var(--na-route),0 0 0 2px var(--sheet),0 2px 8px rgba(0,0,0,.3)}
 .na-pin.v i{background:var(--na-route);color:var(--na-ic)}
 .na-pin.f i{background:var(--pill);color:var(--pillt)}

@@ -35,7 +35,13 @@ const ext = (url, body, cls = '') => /^(https?:|tel:)/i.test(str(url))
 const NAMES = {PHX: 'Phoenix', CLT: 'Charlotte', LGA: 'LaGuardia'};
 const apName = code => str(guide(code) && guide(code).name).replace(/\s+International\b/i, '').trim() || NAMES[code] || code;
 const apCity = code => { const g = guide(code); return str(g && g.city).replace(/\s*\(.*?\)\s*/g, ' ').trim() || {PHX: 'Phoenix', CLT: 'Charlotte', LGA: 'New York'}[code] || code; };
-const flightNo = l => l ? str(l.flight) || `${l.carrier || 'AA'}${l.num || ''}` : '';
+// "AA 123": carrier and number with a no-break space, from the data or the guide's text.
+const fnoText = s => str(s).replace(/\b([A-Z]{2})(\d{2,4})\b/g, '$1 $2');
+const flightNo = l => {
+  if (!l) return '';
+  const f = str(l.flight).trim(), m = f.match(/^([A-Z]{2})\s*(\d+)$/);
+  return m ? `${m[1]} ${m[2]}` : f || (l.num ? `${l.carrier || 'AA'} ${l.num}` : '');
+};
 const tzAbbr = (ap, iso) => {
   try {
     const p = new Intl.DateTimeFormat('en-US', {timeZone: N.tz(ap), timeZoneName: 'short'}).formatToParts(iso ? new Date(iso) : N.now());
@@ -43,6 +49,8 @@ const tzAbbr = (ap, iso) => {
     return /^(GMT|UTC)/.test(z) ? '' : z;
   } catch (e) { return ''; }
 };
+// A meta line: parts joined with " · ", each kept whole unless it is long enough to need wrapping.
+const meta = parts => parts.filter(Boolean).map((x, i) => h`${i ? ' · ' : ''}${String(x).length <= 28 ? h`<span class="nw">${x}</span>` : x}`);
 const sameDay = (a, b, ap) => { try { return !!a && !!b && N.ymd(a, ap) === N.ymd(b, ap); } catch (e) { return false; } };
 // "4:31a" today, "Sun 2:31p" on another day (airport-local).
 const when = (iso, ap) => !okT(iso) ? '' : sameDay(iso, N.now(), ap) ? N.time(iso, ap) : `${N.date(iso, ap).split(' ')[0]} ${N.time(iso, ap)}`;
@@ -61,6 +69,9 @@ const localMin = (iso, code) => {
 
 // ---------- the trip at this airport ----------
 const departed = l => !!l && !l.canceled && !!(l.departed || (l.dep && l.dep.actual) || ['air', 'landed', 'past'].includes(l.state) || (okT(l.dep && l.dep.time) && nowMs() >= T(l.dep.time)));
+// What the flight data has confirmed, not what the clock implies: only these say "left" / "landed".
+const leftOK = l => !!l && !l.canceled && !!(l.departed || (l.dep && l.dep.actual) || ['air', 'landed'].includes(l.state));
+const downOK = l => !!l && !l.canceled && !!(l.landed || (l.arr && l.arr.actual) || l.state === 'landed');
 
 function codes() {
   const out = [];
@@ -200,27 +211,29 @@ function heroHtml(code, v, list, auto) {
   const terms = arr(g && g.terminals).filter(obj);
   const tl = term ? termLabel(term) : terms.length === 1 ? str(terms[0].name) : '';
   // Time and zone never split across lines ("5:59a" / "MST").
-  const tz = iso => h`<span class="ap-nw">${tmz(iso, code)}</span>`;
+  const tz = iso => h`<span class="nw">${tmz(iso, code)}</span>`;
+  // Past tense only once the flight data says so; a passed time alone reads "due … · not confirmed yet".
+  const said = (l, iso, done, verb, past, what) => l.canceled ? 'canceled' : done ? h`${past} ${tz(iso)}`
+    : nowMs() >= T(iso) ? h`${l.state === 'past' ? 'was due' : 'due'} ${tz(iso)} · <span class="nw">${what} not confirmed yet</span>` : h`${verb}${verb ? ' ' : ''}${tz(iso)}`;
   let l1 = '', l2 = '';
   if (v && v.role === 'depart') {
     const l = v.out;
-    l1 = okT(l.dep.time) ? h`${flightNo(l)} to ${apCity(l.to)}, ${l.canceled ? 'canceled' : departed(l) ? h`left ${tz(l.dep.time)}` : tz(l.dep.time)}` : `${flightNo(l)} to ${apCity(l.to)}, time not confirmed`;
+    l1 = okT(l.dep.time) ? h`${flightNo(l)} to ${apCity(l.to)}, ${said(l, l.dep.time, leftOK(l), '', 'left', 'departure')}` : `${flightNo(l)} to ${apCity(l.to)}, time not confirmed`;
   } else if (v && v.role === 'connect') {
     l1 = okT(v.inn.arr.time) && okT(v.out.dep.time)
       ? `${N.dur(N.mins(v.inn.arr.time, v.out.dep.time))} between ${flightNo(v.inn)} and ${flightNo(v.out)}`
       : `${flightNo(v.inn)} in, ${flightNo(v.out)} out, times not confirmed`;
   } else if (v) {
     const l = v.inn;
-    const down = l.landed || l.arr.actual || nowMs() >= T(l.arr.time);
-    l1 = okT(l.arr.time) ? h`${flightNo(l)} from ${apCity(l.from)}, ${l.canceled ? 'canceled' : h`${down ? 'landed' : 'lands'} ${tz(l.arr.time)}`}` : `${flightNo(l)} from ${apCity(l.from)}, time not confirmed`;
+    l1 = okT(l.arr.time) ? h`${flightNo(l)} from ${apCity(l.from)}, ${said(l, l.arr.time, downOK(l), 'lands', 'landed', 'landing')}` : `${flightNo(l)} from ${apCity(l.from)}, time not confirmed`;
   } else l1 = 'Not on your trip';
-  l2 = v ? `${roleWord(v.role)} ${dayOf(v, code)}` : '';
+  l2 = v ? h`<span class="nw">${roleWord(v.role)} ${dayOf(v, code)}</span>` : '';
   return h`<div class="ap-hero">
     <div class="ps ap-ps" role="group" aria-label="Airport">${codes().map(c => h`<button type="button" data-act="ap" data-arg="${lc(c)}" aria-pressed="${c === code ? 'true' : 'false'}">${c}${c === auto ? h`<i class="ap-nd" aria-hidden="true"></i><span class="ap-vh">, now</span>` : ''}</button>`)}</div>
     <div class="ap-top">
       <div class="ey ap-ey">${apName(code)}${tl ? ` · ${tl}` : ''}</div>
       <div class="dp ap-code" aria-label="${code}">${code}</div>
-      <p class="ap-sub"><b data-k="ap-h1-${code}-${v ? v.key : ''}">${l1}</b><span>${l2 ? `${l2} · ` : ''}<span class="ap-nw">${l2 ? 'it’s' : 'It’s'} <span class="tn" data-clock="${code}">${N.time(N.now(), code)}</span>${tzAbbr(code) ? ` ${tzAbbr(code)}` : ''} here</span></span></p>
+      <p class="ap-sub"><b data-k="ap-h1-${code}-${v ? v.key : ''}">${l1}</b><span>${l2 ? h`${l2} · ` : ''}<span class="nw">${l2 ? 'it’s' : 'It’s'} <span class="tn" data-clock="${code}">${N.time(N.now(), code)}</span>${tzAbbr(code) ? ` ${tzAbbr(code)}` : ''} here</span></span></p>
     </div>
     ${illo(code)}
   </div>`;
@@ -275,47 +288,56 @@ function tilesHtml(code, v) {
 function callouts(code, v) {
   const L = live(code), faa = obj(L.faa), wx = obj(L.wx) || {}, g = guide(code);
   const out = [];
-  const co = (tone, ic2, body) => out.push(h`<div class="co ${tone}">${icon(ic2)}<span>${body}</span></div>`);
+  // Every callout leads with what it is in bold, then the detail.
+  const co = (tone, ic2, lead, body) => out.push(h`<div class="co ${tone}">${icon(ic2)}<span><b>${lead}</b>${body ? h` ${body}` : ''}</span></div>`);
+  const why = x => x ? ` (${x})` : '';
   const fs = faa && lc(faa.status);
-  if (fs && /ground/.test(fs)) co('rose', 'alert-triangle', `FAA ground stop at ${code}${faa.reason ? ` (${faa.reason})` : ''}. Flights here are being held.`);
-  else if (fs && /delay/.test(fs)) co('rose', 'clock', `FAA reports delays at ${code}${faa.avg_min ? `, averaging ${faa.avg_min} min` : ''}${faa.reason ? ` (${faa.reason})` : ''}.`);
-  else if (fs === 'closed') co('rose', 'alert-triangle', `FAA lists ${code} as closed${faa.reason ? ` (${faa.reason})` : ''}.`);
+  // Rose for what stops you (ground stop, closed, canceled, at risk); amber edge for what slows you.
+  if (fs && /ground/.test(fs)) co('rose', 'alert-triangle', 'FAA ground stop.', `Flights at ${code} are being held${why(faa.reason)}.`);
+  else if (fs && /delay/.test(fs)) co('ap-warn', 'clock', 'FAA delays.', `Flights at ${code} ${faa.avg_min ? `are averaging ${faa.avg_min} min late` : 'are running late'}${why(faa.reason)}.`);
+  else if (fs === 'closed') co('rose', 'alert-triangle', `${code} closed.`, `The FAA lists the airport as closed${why(faa.reason)}.`);
   arr(wx.alerts).slice(0, 2).forEach(a => {
     const t = typeof a === 'string' ? a : obj(a) ? str(a.event || a.headline || a.title) : '';
-    const ends = obj(a) && okT(a.ends) ? ` until ${when(a.ends, code)}` : '';
-    if (t) co('rose', 'alert-triangle', `${t}${ends}.`);
+    const ends = obj(a) && okT(a.ends) ? `Until ${when(a.ends, code)}.` : '';
+    if (t) co('ap-warn', 'alert-triangle', `${t.replace(/\.\s*$/, '')}.`, ends);
   });
   const legs = v ? [v.inn, v.out].filter(Boolean) : [];
   legs.forEach(l => {
-    if (l.canceled) co('rose', 'alert-triangle', h`${flightNo(l)} is canceled. Rebook in the AA app or at an AA counter. <a class="ap-il2" href="${AA_PHONE}" target="_blank" rel="noopener">Call AA</a>`);
-    else if (l.diverted) co('rose', 'alert-triangle', `${flightNo(l)} diverted to ${l.diverted}. Follow the AA app for the new plan.`);
-    else if (l.route_ok === false) co('rose', 'alert-circle', `The flight data for ${flightNo(l)} doesn't match this route. Check the AA app.`);
+    if (l.canceled) co('rose', 'alert-triangle', `${flightNo(l)} canceled.`, h`Rebook in the AA app or at an AA counter. <a class="ap-il2" href="${AA_PHONE}" target="_blank" rel="noopener">Call AA</a>`);
+    else if (l.diverted) co('rose', 'alert-triangle', `${flightNo(l)} diverted.`, `Now going to ${l.diverted}. Follow the AA app for the new plan.`);
+    else if (l.route_ok === false) co('rose', 'alert-circle', 'Flight data mismatch.', `The data for ${flightNo(l)} doesn't match this route. Check the AA app.`);
   });
-  // Connection: only when it is tight (sand, warn edge) or at risk (rose), and only until you leave.
+  // Connection: only when it is tight (amber edge) or at risk (rose), and only until you leave.
+  // Same model and words as Flights and Today: spare = reaching the gate to its doors closing.
   let c = null;
   if (v && v.role === 'connect') { try { c = N.connection(v.dir); } catch (e) { c = null; } }
   if (c && c.level !== 'ok' && !v.inn.canceled && !v.out.canceled && !overV(v)) {
     const gt = v.out.dep.gate ? `gate ${v.out.dep.gate}` : 'the next gate';
-    co(c.level === 'risk' ? 'rose' : 'ap-tight', 'hourglass', c.spare > 0
-      ? `${c.label} connection: ~${c.spare} min before doors close. Go straight to ${gt}.`
-      : `${c.label} connection: the usual walk reaches ${gt} after the doors close. Go straight there and watch the AA app.`);
+    const doors = N.time(N.addMin(v.out.dep.time, -N.AA.doors), code), reach = N.time(N.addMin(v.inn.arr.time, 10 + c.walk.min), code);
+    co(c.level === 'risk' ? 'rose' : 'ap-warn', 'hourglass', `${c.label} connection.`, c.spare > 0
+      ? `About ${N.dur(c.spare)} to spare before doors close at ${gt} (${doors}). Go straight there.`
+      : c.spare === 0 ? `The usual walk reaches ${gt} just as doors close (${doors}). Go straight there and watch the AA app.`
+      : `The usual walk reaches ${gt} ~${reach}, ${N.dur(-c.spare)} after doors close (${doors}). Go straight there and watch the AA app.`);
   }
   // Delays only while they still matter: the next flight until it leaves, the
   // flight in until it lands.
-  if (v && v.out && !v.out.canceled && v.out.delay_dep > 14 && !departed(v.out)) co('', 'clock', `${flightNo(v.out)} is delayed ${N.dur(v.out.delay_dep)}; now departs ${tmz(v.out.dep.time, code)}.`);
+  if (v && v.out && !v.out.canceled && v.out.delay_dep > 14 && !departed(v.out)) co('ap-warn', 'clock', 'Running late.', `${flightNo(v.out)} is delayed ${N.dur(v.out.delay_dep)}; now departs ${tmz(v.out.dep.time, code)}.`);
   const inn = v && v.inn, late = inn ? +(inn.delay_arr != null ? inn.delay_arr : inn.delay_dep) || 0 : 0;
-  if (inn && !inn.canceled && late > 14 && okT(inn.arr.time) && nowMs() < T(inn.arr.time)) co('', 'clock', `${flightNo(inn)} is running ${N.dur(late)} late; now lands ${tmz(inn.arr.time, code)}.`);
+  if (inn && !inn.canceled && late > 14 && okT(inn.arr.time) && nowMs() < T(inn.arr.time)) co('ap-warn', 'clock', 'Running late.', `${flightNo(inn)} now lands ${tmz(inn.arr.time, code)}, ${N.dur(late)} late.`);
   // The guide's summary, minus what the page already says or the data has answered:
-  // the terminal (in the hero), PreCheck and the checkpoint (in the steps, the Security
-  // tile and card), a gate guess once the gate is posted. Hidden once the visit is over, on the return, and on a connection that isn't comfortable.
+  // its connection length (the hero has it), PreCheck and the checkpoint (in the steps,
+  // the Security tile and card), a gate guess once the gate is posted. Hidden once the
+  // visit is over, on the return, and on a connection that isn't comfortable. Its first
+  // sentence is the lead; a summary that is only the terminal (the hero has it) is dropped.
   const gate = gateOf(v);
-  let summ = g && !(v && (overV(v) || (v.dir === 'ret' && v.role !== 'depart') || (c && c.level !== 'ok'))) ? str(g.summary) : '';
+  let summ = g && !(v && (overV(v) || (v.dir === 'ret' && v.role !== 'depart') || (c && c.level !== 'ok'))) ? fnoText(g.summary) : '';
   const guess = sentences(summ).find(x => /\busually\b/i.test(x)) || '';
-  summ = dropS(summ, /^\s*terminal\s+\w+\.?\s*$|precheck|\bcheckpoint\b|\busually\b|\brecent/i);
-  if (c && c.level === 'ok' && Number.isFinite(c.ground)) summ = summ.replace(/\b\d+ min connection\b/i, `${c.ground} min connection`);
-  if (summ) co('', 'info-circle', summ);
-  if (v && v.role !== 'arrive' && !v.out.canceled && !overV(v) && !gate) co('plain', 'map-pin', `AA hasn’t posted the ${flightNo(v.out)} gate yet.${guess ? ` ${guess.trim()}` : ''} It shows here and on the map once it does.`);
-  if (v && v.dir === 'ret' && !okT(v.at)) co('plain', 'calendar', 'Return times aren’t confirmed yet. Step times fill in once they are.');
+  summ = dropS(summ, /precheck|\bcheckpoint\b|\busually\b|\brecent/i)
+    .replace(/^\s*(?:about\s+)?\d+\s*(?:min(?:ute)?s?|h(?:ours?)?)\s+connection\s*[,;:.]\s*/i, '').replace(/^[a-z]/, x => x.toUpperCase());
+  const ss = sentences(summ).map(x => x.trim());
+  if (ss.length && !(ss.length === 1 && /^terminal\s+\w+\.?$/i.test(ss[0]))) co('', 'info-circle', ss[0], ss.slice(1).join(' '));
+  if (v && v.role !== 'arrive' && !v.out.canceled && !overV(v) && !gate) co('plain', 'map-pin', 'Gate not posted.', guess ? `${guess.trim()} The actual gate shows here and on the map once AA posts it.`
+    : `The ${flightNo(v.out)} gate shows here and on the map once AA posts it.`);
   return out;
 }
 // Guide caveats, minus the ones the data has already answered.
@@ -323,7 +345,7 @@ function caveats(code, v) {
   const g = guide(code);
   const gatesKnown = v && (v.role === 'arrive' ? !!v.inn.arr.gate : !!v.out.dep.gate && (!v.inn || !!v.inn.arr.gate));
   const retKnown = legsOf('ret').length > 0 && legsOf('ret').every(l => okT(l.dep.time));
-  return arr(g && g.caveats).map(str).filter(Boolean).filter(c =>
+  return arr(g && g.caveats).map(fnoText).filter(Boolean).filter(c =>
     !(gatesKnown && /gates?\b.*\bnot\b.*\bassigned|not assigned/i.test(c)) && !(retKnown && /return.*not confirmed/i.test(c)));
 }
 
@@ -335,17 +357,24 @@ function flightsHtml(code, v) {
     const st = legSt(l);
     const t = inbound ? l.arr.time : l.dep.time;
     const gate = inbound ? l.arr.gate : l.dep.gate, term = inbound ? l.arr.terminal : l.dep.terminal;
-    const bits = [okT(t) ? `${inbound ? 'Lands' : 'Departs'} ${tmz(t, code)}` : 'Time not confirmed',
+    // Past tense only once the flight data confirms it; a passed time alone is "Due" ("Was due"
+    // once the leg is over by the clock and the chip says Done).
+    const done = inbound ? downOK(l) : leftOK(l);
+    const verb = done ? (inbound ? 'Landed' : 'Left') : l.state === 'past' ? 'Was due' : okT(t) && nowMs() >= T(t) ? 'Due' : inbound ? 'Lands' : 'Departs';
+    const stT = str(st.text).split(' · ').pop();
+    // The chip already says "Not confirmed"; the line does not repeat it.
+    const bits = [okT(t) ? `${verb} ${tmz(t, code)}` : stT === 'Not confirmed' ? '' : 'Time not confirmed',
       gate ? `Gate ${gate}` : 'Gate not posted', term ? termLabel(term) : '', inbound && l.arr.baggage ? `Carousel ${l.arr.baggage}` : ''].filter(Boolean);
     const seats = arr(l.seats).filter(Boolean);
-    // Rose only for a real problem; a delay or change gets an amber ring.
+    // Rose only for a real problem; a delay or change gets an amber ring. The chip keeps the
+    // part that matters ("In the air · 41 min late" → "41 min late"); the row says the rest.
     const chip = st.tone === 'bad' ? 'rose' : st.tone === 'warn' ? 'cr ap-cw' : 'cr';
     return h`<a class="ap-fl" href="#flight/${l.id}">
       <span class="ic">${icon(inbound ? 'plane-arrival' : 'plane-departure')}</span>
       <div class="grow"><b>${flightNo(l)} ${inbound ? `from ${apCity(l.from)}` : `to ${apCity(l.to)}`}</b>
-        <small class="tn">${bits.join(' · ')}</small>
+        <small class="tn">${meta(bits)}</small>
         ${seats.length ? h`<small class="tn">Seats ${seats.join(', ')}</small>` : ''}</div>
-      <span class="chip ${chip} ap-fc" data-k="ap-st-${l.id}">${st.text}</span></a>`;
+      <span class="chip ${chip} ap-fc" data-k="ap-st-${l.id}" title="${st.text}"><span>${stT}</span></span></a>`;
   };
   if (v.inn) rows.push(row(v.inn, true));
   if (v.out) rows.push(row(v.out, false));
@@ -356,7 +385,8 @@ function flightsHtml(code, v) {
 // Guide text as sentences, so a sentence the data has already answered can be dropped.
 const sentences = s => str(s).match(/[^.!?]+(?:[.!?]+|$)/g) || [];
 const dropS = (s, re) => sentences(s).filter(x => !re.test(x)).join('').trim();
-// Transit's pick for a direction when Transit shares it (N.bestRoute): {id, name, mins, leave}.
+// Transit's pick for a direction when Transit shares it (N.bestRoute): {id, name, mins: '45–60 min',
+// range: [45, 60], leave}.
 // Transit names its directions 'to-hotel' / 'to-lga'; the bare names are tried too.
 function transitPick(kind) {
   if (typeof N.bestRoute !== 'function') return null;
@@ -365,16 +395,17 @@ function transitPick(kind) {
   }
   return null;
 }
-const minsTxt = m => Array.isArray(m) ? `${m[0]}–${m[1]} min` : Number.isFinite(+m) && m !== '' && m != null ? `${+m} min` : '';
+const minsTxt = m => Array.isArray(m) ? (m[0] === m[1] ? `${m[0]} min` : `${m[0]}–${m[1]} min`)
+  : Number.isFinite(+m) && m !== '' && m != null ? `${+m} min` : /^\d+(–\d+)? min$/.test(str(m)) ? str(m) : '';
 function stepsHtml(code, v) {
   const g = guide(code);
   const title = !v ? 'Steps' : v.role === 'depart' ? `Leaving from ${code}` : v.role === 'connect' ? `Connecting at ${code}` : `Arriving at ${code}`;
   const head = h`<div class="ey">${title}</div>`;
-  if (!v) return h`<section class="sec ap-anc" id="ap-steps">${head}<div class="co plain">${icon('info-circle')}<span>${code} isn’t on your trip, so there are no timed steps here.</span></div></section>`;
+  if (!v) return h`<section class="sec ap-anc" id="ap-steps">${head}<div class="co plain">${icon('info-circle')}<span><b>Not on your trip.</b> ${code} has no timed steps.</span></div></section>`;
   let steps = arr(obj(g && g.steps) ? g.steps[v.role] : null).filter(obj);
   if (!steps.length) {
-    const msg = v.role === 'arrive' ? `No arrival steps saved for ${code}. Ground options are below.` : `No ${v.role === 'connect' ? 'connection' : 'departure'} steps saved for ${code} yet.`;
-    return h`<section class="sec ap-anc" id="ap-steps">${head}<div class="co plain">${icon('info-circle')}<span>${msg}</span></div></section>`;
+    const msg = v.role === 'arrive' ? 'Ground options are below.' : `The guide has no ${v.role === 'connect' ? 'connection' : 'departure'} steps for ${code} yet.`;
+    return h`<section class="sec ap-anc" id="ap-steps">${head}<div class="co plain">${icon('info-circle')}<span><b>No steps saved.</b> ${msg}</span></div></section>`;
   }
   // Steps written for the other direction (CLT on the way home): swap in this
   // visit's flight numbers and drop details that quote the other day's times.
@@ -385,7 +416,7 @@ function stepsHtml(code, v) {
     if (other.out && v.out && flightNo(other.out) !== flightNo(v.out)) swap.push([flightNo(other.out), flightNo(v.out)]);
   }
   const reused = swap.length > 0;
-  const sub = s => swap.reduce((a, [x, y]) => a.split(x).join(y), str(s));
+  const sub = s => swap.reduce((a, [x, y]) => a.split(x).join(y), fnoText(s));
   const hasClock = s => /\b\d{1,2}(:\d{2})?\s?[ap]\b|\b\d{1,2}\/\d{1,2}\b/i.test(str(s));
   const w = N.wallet ? N.wallet() : {};
   const bags = Number.isFinite(+w.bags) ? +w.bags : 0;
@@ -393,9 +424,16 @@ function stepsHtml(code, v) {
   const gIn = v.inn ? str(v.inn.arr.gate).toUpperCase() : '', gOut = v.out ? str(v.out.dep.gate).toUpperCase() : '';
   const board = v.out && okT(v.out.dep.time) ? T(N.addMin(v.out.dep.time, -N.AA.board)) : NaN;
   // On a connection, once AA posts the next gate: the walk to it (the map's figure, else a concourse guess).
-  let wk = null;
+  let wk = null, c = null;
+  if (v.role === 'connect') { try { c = N.connection(v.dir); } catch (e) { c = null; } }
   if (v.role === 'connect' && gOut && typeof N.walk === 'function') { try { wk = N.walk(code, gIn || null, gOut); } catch (e) { wk = null; } }
+  // A connection runs on the same clock as its rating (N.connection): the door opens ~10 min after
+  // landing, then the walk; so the steps, the callout and Flights agree on when you reach the gate.
+  const arrT = v.role === 'connect' && v.inn && okT(v.inn.arr.time) ? v.inn.arr.time : null;
+  const walkMin = wk ? wk.min : c && c.walk ? c.walk.min : 15;
+  const offAt = arrT ? N.addMin(arrT, 10) : null, reachAt = arrT ? N.addMin(arrT, 10 + walkMin) : null;
   const gateStep = s => v.role === 'connect' && (s.icon === 'device-mobile' || /\bfind\b.*\bgate\b/i.test(str(s.title)));
+  const walkStep = s => v.role === 'connect' && s.icon === 'route' && /\bwalk\b/i.test(str(s.title));
   const rows = steps.map(s => {
     const rel = obj(s.rel);
     let at = null;
@@ -403,12 +441,19 @@ function stepsHtml(code, v) {
       const base = rel.to === 'arr' ? v.inn && v.inn.arr.time : v.out && v.out.dep.time;
       at = okT(base) ? N.addMin(base, +rel.min) : null;
     }
-    // A meal that would land after boarding starts is no longer a step.
-    if ((s.icon === 'tools-kitchen-2' || s.icon === 'coffee') && okT(at) && T(at) > board) return null;
+    const meal = s.icon === 'tools-kitchen-2' || s.icon === 'coffee';
+    let min = +s.min || 0;
+    if (arrT && rel) {
+      if (/\bdeplane\b/i.test(str(s.title))) { at = arrT; min = 10; }
+      else if (gateStep(s) || walkStep(s)) { at = offAt; if (gOut || walkStep(s)) min = walkMin; }
+      else if (meal) at = reachAt;
+    }
+    // A meal that would start once boarding has is no longer a step.
+    if (meal && okT(at) && T(at) >= board) return null;
     // The gate step below names the walk once the gate is known.
-    if (v.role === 'connect' && s.icon === 'route' && /\bwalk\b/i.test(str(s.title)) && wk && wk.known) return null;
+    if (walkStep(s) && wk && wk.known) return null;
     const extra = [];
-    let t = sub(s.title) || 'Step', detail = reused && hasClock(s.detail) ? '' : sub(s.detail), min = +s.min || 0, link = '', hideMin = false;
+    let t = sub(s.title) || 'Step', detail = reused && hasClock(s.detail) ? '' : sub(s.detail), link = '', hideMin = false;
     if (s.icon === 'car' && v.role === 'depart' && rel) {
       let lv = null; try { lv = N.leave(v.dir); } catch (e) { lv = null; }
       if (lv && okT(lv.at)) {
@@ -424,11 +469,17 @@ function stepsHtml(code, v) {
     if (gateStep(s) && gOut) {
       t = `Gate ${gOut}${gIn ? ` · from ${gIn}` : ''}${wk && wk.known ? ` · ~${wk.min} min` : ''}`;
       detail = '';
-      if (wk && wk.known) { min = wk.min; hideMin = true; }
+      if (wk && wk.known) hideMin = true;
       if (obj(g && g.nav)) link = `#nav/${lc(code)}/@arr/@dep`;
     }
+    // When you reach the gate against its doors, rated like the connection (amber tight, rose at risk).
+    if (gateStep(s) && gOut && c && reachAt && okT(v.out.dep.time)) {
+      const sp = N.mins(reachAt, N.addMin(v.out.dep.time, -N.AA.doors));
+      extra.push({t: meta([`At gate ~${N.time(reachAt, code)}`, `${sp >= 0 ? `${N.dur(sp)} before` : `${N.dur(-sp)} after`} doors close`]),
+        cls: c.level === 'risk' ? 'ap-xr' : c.level === 'tight' ? 'ap-xw' : ''});
+    }
     if (s.icon === 'luggage' && v.role === 'depart' && v.out && okT(v.out.dep.time)) {
-      extra.push(`Bag drop closes ${tmz(N.addMin(v.out.dep.time, -N.AA.bagdrop), code)}${bags > 0 ? ` · ${N.plural(bags, 'checked bag')} in Wallet` : ''}`);
+      extra.push(meta([`Bag drop closes ${tmz(N.addMin(v.out.dep.time, -N.AA.bagdrop), code)}`, bags > 0 && `${N.plural(bags, 'checked bag')} in Wallet`]));
     }
     if (s.icon === 'luggage' && v.role === 'arrive' && v.inn.arr.baggage) {
       extra.push(`Carousel ${v.inn.arr.baggage}`);
@@ -437,7 +488,7 @@ function stepsHtml(code, v) {
     // Into the city: Transit's best way right now, so both screens give the same minutes.
     if (s.icon === 'building-skyscraper' && v.role === 'arrive' && v.dir === 'out') {
       const r = transitPick('hotel');
-      const m = r ? minsTxt(r.mins) : '';
+      const m = r ? minsTxt(r.range || r.mins) : '';
       if (m) detail = `About ${m} by ${r.name} right now.`;
     }
     if (s.icon === 'plane-departure' && gOut) extra.push(`Gate ${gOut}`);
@@ -478,7 +529,7 @@ function stepsHtml(code, v) {
       <div class="ap-sb"><b>${r.title}</b>
         ${next ? i === active || T(r.at) - now <= 60000 ? h`<span class="ap-in">Now</span>` : h`<span class="ap-in">in <span data-until="${r.at}">${N.until(r.at)}</span></span>` : ''}
         ${r.detail ? h`<small>${r.detail}</small>` : ''}
-        ${r.extra.map(x => h`<small class="ap-x">${x}</small>`)}
+        ${r.extra.map(x => h`<small class="${N.cls('ap-x', x.cls)}">${x.t || x}</small>`)}
         ${r.min && !r.hideMin ? h`<small class="ap-mn">${icon('clock')}About ${N.dur(r.min)}</small>` : ''}
         ${r.link ? h`<a class="ap-tb ap-wk ap-sl" href="${r.link}">${ic('walk', 'route')}<span>Walk me there</span></a>` : ''}</div>
     </li>`;
@@ -869,7 +920,7 @@ function mapHtml(code, v, gq) {
   const d = m.route ? 'M' + m.route.map(p => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join('L') : '';
   const src = typeof m.source === 'string' ? m.source : obj(m.source) ? str(m.source.name || m.source.text) : '';
   const both = v && v.role === 'connect' && m.you.length > 1;
-  const sub = both ? `Gates ${str(v.inn.arr.gate).toUpperCase()} → ${str(v.out.dep.gate).toUpperCase()} marked`
+  const sub = both ? h`Gates ${str(v.inn.arr.gate).toUpperCase()} ${icon('arrow-right')}<span class="sr">to</span> ${str(v.out.dep.gate).toUpperCase()} marked`
     : m.gateLabel ? `${m.gateLabel} marked` : m.gateMissing ? 'Gate not posted yet' : '';
   const kinds = new Set(m.poi.map(p => p.kind));
   const key = [
@@ -1200,7 +1251,7 @@ function mountMap(root, m, gq) {
       const a = m.you.find(p => p.tone === 'you') || m.you[0];
       if (a) { cx = N.clamp(cx, a.x - hw + mg, a.x + hw - mg); cy = N.clamp(cy, a.y - hv + mg, a.y + hv - mg); }
       animTo(s, cx, cy);
-      say(m.you.map(p => p.label).join(' → ') || m.gateLabel);
+      say(m.you.map(p => p.label).join(' to ') || m.gateLabel);
     },
     cleanup: () => {
       stop(); clearTimeout(tapT); clearTimeout(hitT);
@@ -1228,7 +1279,7 @@ function securityHtml(code, v) {
   // Through security on the way out (the step's length, at least 20 min, has passed): nothing left to choose.
   if (role === 'depart' && (departed(v.out) || (at && nowMs() >= T(at) + Math.max(+(secStep(code) || {}).min || 0, 20) * 60000))) return '';
   if (!list.length) return role === 'connect' || role === 'arrive' ? ''
-    : h`<section class="sec ap-anc" id="ap-sec"><div class="ey">Security</div><div class="co plain">${icon('info-circle')}<span>No checkpoint details saved for ${code}.</span></div></section>`;
+    : h`<section class="sec ap-anc" id="ap-sec"><div class="ey">Security</div><div class="co plain">${icon('info-circle')}<span><b>No checkpoint details.</b> The guide has none saved for ${code}.</span></div></section>`;
   const card = s => {
     const r = hoursRange(s.hours);
     const o = m == null ? null : openAt(r, m);
@@ -1258,7 +1309,7 @@ function foodHtml(code, v) {
   const g = guide(code);
   const list = arr(g && g.food).filter(obj);
   const head = h`<div class="ey">Food and coffee</div>`;
-  if (!list.length) return h`<section class="sec ap-anc" id="ap-food">${head}<div class="co plain">${icon('info-circle')}<span>No food listed for ${code} yet.</span></div></section>`;
+  if (!list.length) return h`<section class="sec ap-anc" id="ap-food">${head}<div class="co plain">${icon('info-circle')}<span><b>No food listed.</b> The guide has none saved for ${code} yet.</span></div></section>`;
   const gate = v ? (v.role === 'arrive' ? v.inn.arr.gate : v.out.dep.gate || (v.inn && v.inn.arr.gate)) : null;
   const gm = normG(gate).match(/^([A-Z]*)(\d+)/);
   const land = f => /before security|landside|pre-?security|ticketing|check-?in|departures|checkpoints?\b/i.test(`${str(f.near)} ${str(f.where)}`) && !/after security|airside/i.test(str(f.where));
@@ -1274,10 +1325,18 @@ function foodHtml(code, v) {
     if (/ATRIUM|HUB|CENTER|BRIDGE|FOOD HALL|MAIN/.test(s)) return 30;
     return 60;
   };
-  // When you'd eat: before boarding on a departure or connection, soon after landing on arrival.
-  const eatAt = v && v.out && okT(v.out.dep.time) ? N.addMin(v.out.dep.time, -N.AA.board - 10)
-    : v && v.role === 'arrive' && okT(v.inn.arr.time) ? N.addMin(v.inn.arr.time, 20) : null;
+  // When you'd eat, and never earlier than now: once off the plane on a connection, before
+  // boarding on a departure, soon after landing on arrival.
+  const role = v && v.role;
+  const base = role === 'connect' && okT(v.inn.arr.time) ? N.addMin(v.inn.arr.time, 10)
+    : role === 'depart' && okT(v.out.dep.time) ? N.addMin(v.out.dep.time, -N.AA.board - 10)
+    : role === 'arrive' && okT(v.inn.arr.time) ? N.addMin(v.inn.arr.time, 20) : null;
+  const isNow = !!base && nowMs() >= T(base);
+  const eatAt = !base ? null : isNow ? N.now().toISOString() : base;
   const em = eatAt ? localMin(eatAt, code) : null;
+  // No time to eat once that is at or past boarding: the list folds away under why.
+  const board = role !== 'arrive' && v && v.out && okT(v.out.dep.time) ? T(N.addMin(v.out.dep.time, -N.AA.board)) : NaN;
+  const late = !!eatAt && T(eatAt) >= board && !overV(v);
   const openInfo = f => {
     if (em == null) return {open: null};
     const hs = str(f.hours), r = hoursRange(hs);
@@ -1294,29 +1353,34 @@ function foodHtml(code, v) {
   const pre = items.filter(x => x.land);
   const row = x => {
     const f = x.f, near = gm && x.sc <= 4 && x.open !== false;
+    // "At your gate" only when it is your gate; otherwise where it is ("Near your gate, at B1").
+    const mine = h`<span class="ap-me">${!/^[A-Z]{0,2}\d{1,3}$/i.test(str(f.near)) ? 'Near your gate' : normG(f.near) === normG(gate) ? 'At your gate' : `Near your gate, at ${str(f.near).toUpperCase()}`}</span>`;
     const kind = /coffee|caf|espresso|tea\b|starbucks|peet|dunkin/i.test(`${str(f.kind)} ${str(f.name)}`) ? 'coffee' : 'tools-kitchen-2';
     // Where it is goes in the subline ("Near A7"); a gate-area "where" that only repeats the gate letter is dropped.
     const nr = str(f.near), gt = /^[A-Z]{0,2}\d{1,3}$/i.test(nr);
     const where = gt && /^airside,?\s+[A-Z] gates$/i.test(str(f.where)) ? '' : str(f.where);
     // Skip a landmark the location line already starts with ("Atrium · Atrium, upper level").
     const said = !gt && nr && where.toLowerCase().startsWith(nr.toLowerCase());
-    const sub = [near || said ? '' : nr ? (gt ? `Near ${nr.toUpperCase()}` : nr) : '', where, apTime(f.hours)].filter(Boolean).join(' · ');
+    const sub = [near || said ? '' : nr ? (gt ? `Near ${nr.toUpperCase()}` : nr) : '', where, apTime(f.hours)];
     // One status per row: open (green dot), opens later (amber dot) or closed (grey dot).
     const st = x.open == null ? '' : x.open ? h`<span class="ap-os on">Open</span>`
       : x.a != null ? h`<span class="ap-os soon">Opens ${clockTxt(x.a)}</span>` : h`<span class="ap-os off">Closed</span>`;
     return h`<div class="ap-fd">
       <span class="ic">${icon(kind)}</span>
-      <div class="grow"><b>${str(f.name) || 'Food'}</b><small>${near ? h`<span class="ap-me">By your gate${gt ? ` (${nr.toUpperCase()})` : ''}</span>${sub ? ' · ' : ''}` : ''}${sub}</small>${f.note ? h`<small class="ap-fn">${f.note}</small>` : ''}</div>
+      <div class="grow"><b>${str(f.name) || 'Food'}</b><small>${meta([near && mine, ...sub])}</small>${f.note ? h`<small class="ap-fn">${f.note}</small>` : ''}</div>
       ${st}
     </div>`;
   };
-  const sortNote = `${gm ? `Nearest to gate ${str(gate).toUpperCase()} first.` : 'Sorted by your gate once AA posts it.'}${em != null ? ` Open or not at ${tmz(eatAt, code)}, ${v.role === 'arrive' ? 'after landing' : 'before boarding'}.` : ''}`;
+  const sortNote = `${gm ? `Nearest to gate ${str(gate).toUpperCase()} first.` : 'Sorted by your gate once AA posts it.'}${em == null ? ''
+    : isNow ? ' Shows what’s open now.' : ` Shows what’s open at ${tmz(eatAt, code)}, ${role === 'connect' ? 'once you’re off the plane' : role === 'arrive' ? 'after landing' : 'before boarding'}.`}`;
   // The four nearest stay in view; the rest and anything outside security open below.
   const top = air.slice(0, 4), rest = air.slice(4);
-  const preH = pre.length ? h`<div class="ap-subh">${v && v.role === 'connect' ? 'Outside security (means screening again)' : v && v.role === 'arrive' ? 'Outside security' : 'Before security'}</div><div class="ap-list">${pre.map(row)}</div>` : '';
-  return h`<section class="sec ap-anc" id="ap-food">${head}<p class="ap-note">${sortNote}</p>
+  const preH = pre.length ? h`<div class="ap-subh">${role === 'connect' ? 'Outside security (means screening again)' : role === 'arrive' ? 'Outside security' : 'Before security'}</div><div class="ap-list">${pre.map(row)}</div>` : '';
+  const body = h`<p class="ap-note">${sortNote}</p>
     <div class="ap-list">${top.map(row)}</div>
-    ${rest.length || pre.length ? more(`More places (${rest.length + pre.length})`, h`${rest.length ? h`<div class="ap-list">${rest.map(row)}</div>` : ''}${preH}`) : ''}</section>`;
+    ${rest.length || pre.length ? more(`More places (${rest.length + pre.length})`, h`${rest.length ? h`<div class="ap-list">${rest.map(row)}</div>` : ''}${preH}`) : ''}`;
+  return late ? fold('food', 'Food and coffee', nowMs() >= board ? 'Boarding has started' : 'No time before boarding', body)
+    : h`<section class="sec ap-anc" id="ap-food">${head}${body}</section>`;
 }
 
 // US phone numbers in guide text become real call/text buttons (at 3am you
@@ -1355,6 +1419,14 @@ function servicesHtml(code) {
 
 const MODE_IC = {car: 'car', taxi: 'car', rideshare: 'car', valet: 'parking', parking: 'parking', garage: 'parking', economy: 'parking',
   bus: 'bus', shuttle: 'bus', van: 'bus', train: 'train', subway: 'train', rail: 'train', lirr: 'train', walk: 'walk'};
+// LGA's ground options open Transit's own route for the same way in (#route/hotel/to-hotel-…),
+// so both screens show one set of steps and times; the guide's row is the fallback.
+const gkey = id => /lirr/i.test(id) ? 'lirr' : /q70/i.test(id) ? 'q70' : /m60/i.test(id) ? 'm60' : /van/i.test(id) ? 'van' : '';
+const routeId = x => {
+  const k = gkey(str(x.id)), tr = obj(N.data.guide && N.data.guide.transit) || {};
+  const r = arr(tr.to_hotel).filter(r => obj(r) && /^[\w-]+$/.test(str(r.id))).find(r => k ? gkey(str(r.id)) === k : r.mode === x.mode && !gkey(str(r.id)));
+  return r ? str(r.id) : /^[\w-]+$/.test(str(x.id)) ? str(x.id) : '';
+};
 function groundHtml(code, v) {
   const g = guide(code);
   const list = arr(g && g.ground).filter(obj);
@@ -1369,12 +1441,13 @@ function groundHtml(code, v) {
     const t = mn.length ? `${mn[0]}${mn[1] && mn[1] !== mn[0] ? `–${mn[1]}` : ''} min` : '';
     const body = h`<span class="ic">${ic(MODE_IC[lc(x.mode)] || lc(x.mode), 'route')}</span>
       <div class="grow"><b>${str(x.name) || 'Option'}</b>
-        <small class="tn">${[t, str(x.cost)].filter(Boolean).join(' · ')}</small>
+        <small class="tn">${meta([t, str(x.cost)])}</small>
         ${x.where ? h`<small>${x.where}</small>` : ''}
         ${x.good ? h`<small class="ap-gd">${icon('thumb-up')}${x.good}</small>` : ''}
         ${x.bad ? h`<small class="ap-bd">${icon('alert-circle')}${x.bad}</small>` : ''}</div>`;
-    return nyc && into && x.id && /^[\w-]+$/.test(str(x.id))
-      ? h`<a class="ap-gr" href="#route/hotel/${x.id}">${body}${icon('chevron-right', 'ap-chev')}</a>`
+    const rid = nyc && into ? routeId(x) : '';
+    return rid
+      ? h`<a class="ap-gr" href="#route/hotel/${rid}">${body}${icon('chevron-right', 'ap-chev')}</a>`
       : h`<div class="ap-gr">${body}</div>`;
   });
   const tr = nyc ? h`<a class="ap-tr" href="#transit"><span class="ic">${icon('route')}</span><div class="grow"><b>${into ? 'Compare ways into Manhattan' : 'Compare ways to LGA'}</b><small>Taxi, train and bus with today’s times in Transit</small></div>${icon('chevron-right', 'ap-chev')}</a>` : '';
@@ -1413,7 +1486,7 @@ const timePast = (f, code) => {
 function infoHtml(code, v) {
   const g = guide(code);
   const facts = arr(g && g.facts).filter(obj).filter(f => !mdPast(f.label, code) && !timePast(f, code));
-  const tips = arr(g && g.tips).map(str).filter(t => t && !mdPast(t, code));
+  const tips = arr(g && g.tips).map(fnoText).filter(t => t && !mdPast(t, code));
   const links = arr(g && g.links).filter(obj).filter(l => /^https?:|^tel:/i.test(str(l.url)));
   const cav = caveats(code, v);
   if (!facts.length && !tips.length && !links.length && !cav.length) return '';
@@ -1449,7 +1522,7 @@ function render(ctx) {
   const known = codes();
   if (!/^[A-Z]{3}$/.test(code) || (!known.includes(code) && !guide(code))) {
     return {hero: emptyHero('Airport not on this trip', `“${str(ctx.param).replace(/\?.*$/, '').slice(0, 12)}” isn’t one of your airports.`),
-      body: h`<div class="ap-pg"><div class="co plain">${icon('building-airport')}<span>Pick one of your airports above, or open the one that matters now.</span></div>
+      body: h`<div class="ap-pg"><div class="co plain">${icon('building-airport')}<span><b>Pick an airport.</b> Choose one of yours above, or open the one that matters now.</span></div>
         <div class="wrap ap-ml"><a class="chip cr ap-c44" href="#airports">${icon('current-location')}Airport for right now</a></div></div>`};
   }
   const auto = autoCode();
@@ -1458,7 +1531,7 @@ function render(ctx) {
   const g = guide(code);
   if (!g && !N.data.trip) {
     return {hero: heroHtml(code, v, list, auto),
-      body: h`<div class="ap-pg"><div class="co plain">${icon('info-circle')}<span>The airport guide isn’t on this phone yet. Open the app once with signal to load it.</span></div></div>`};
+      body: h`<div class="ap-pg"><div class="co plain">${icon('info-circle')}<span><b>Guide not loaded.</b> Open the app once with signal to put it on this phone.</span></div></div>`};
   }
   const seg = list.length > 1 ? h`<div class="seg ap-seg" role="group" aria-label="Which visit">${list.map(x => h`<button type="button" data-act="visit" data-arg="${x.key}" aria-pressed="${x === v ? 'true' : 'false'}">${roleWord(x.role)} ${dayOf(x, code).split(' ').slice(0, 2).join(' ')}</button>`)}</div>` : '';
   const cos = callouts(code, v);
@@ -1478,7 +1551,7 @@ function render(ctx) {
     ${tilesHtml(code, v)}
     ${cos.length ? h`<div class="stack8 ap-cos">${cos}</div>` : ''}
     ${flightsHtml(code, v)}
-    ${!g ? h`<div class="co plain ap-ng">${icon('info-circle')}<span>No guide saved for ${code} yet; only flight and conditions data are shown.</span></div>` : ''}
+    ${!g ? h`<div class="co plain ap-ng">${icon('info-circle')}<span><b>No guide for ${code}.</b> Only flight and conditions data are shown.</span></div>` : ''}
     ${jumps.length > 1 ? h`<nav class="ap-jump" data-hscroll aria-label="Jump to">${jumps.map(id => h`<button type="button" class="ap-j" data-act="jump" data-arg="${id}">${icon(label[id][1])}${label[id][0]}</button>`)}</nav>` : ''}
     ${order.map(k => S[k])}
   </div>`;

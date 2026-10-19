@@ -352,13 +352,14 @@ function resolve(st, key) {
     if (g) return poiEnd(key, g, {leg: L});
     const hb = hubFor(P, concOf(s.gate));
     if (!hb) return null;
+    // callout notes: {b: lead phrase, t: the rest}
     const note = s.gate
-      ? `Gate ${s.gate} isn’t on this map — showing the way to ${mid(hb.label)}`
-      : `Gate not posted yet — showing the way to ${mid(hb.label)}; this updates when the gate posts`;
+      ? {b: `Gate ${s.gate} isn’t on this map.`, t: `Showing the way to ${mid(hb.label)}.`}
+      : {b: 'Gate not posted yet.', t: `Showing the way to ${mid(hb.label)} until it posts.`};
     // the same gap at the start of a route reads differently
     const noteFrom = s.gate
-      ? `Gate ${s.gate} isn’t on this map — starting from ${hb.label}`
-      : `${arr ? 'Arrival gate' : 'Gate'} not posted yet — starting from ${mid(hb.label)}; this updates when it posts`;
+      ? {b: `Gate ${s.gate} isn’t on this map.`, t: `Starting from ${mid(hb.label)}.`}
+      : {b: `${arr ? 'Arrival gate' : 'Gate'} not posted yet.`, t: `Starting from ${mid(hb.label)} until it posts.`};
     return hb.poi ? poiEnd(key, hb.poi, {kind: 'hub', label: hb.label, note, noteFrom, leg: L})
       : nodeEnd(P, key, hb.node, {kind: 'hub', label: hb.label, side: 'air', note, noteFrom, leg: L});
   }
@@ -435,14 +436,16 @@ function clean(s) {
   let t = strip(s);
   if (!t || /^level\s*\w+\s*(,|$)/i.test(t)) return null;
   t = t.replace(/,\s*(level\s*\w+|gate level)$/i, '').replace(/^Level \d+[A-Z]?\s+(?=[a-z])/, '')
-    // "Atrium, east end" -> "East end of the atrium"
+    // "Atrium, east end" -> "East end of the Atrium"
     .replace(/^(.+), (east|west|north|south) end$/i, (m, a, d) => `${d} end of ${mid(a)}`)
     .replace(/^(.+), (center|centre)$/i, (m, a) => `middle of ${mid(a)}`)
     .replace(/^([A-Z][a-z][^,]*), (east|west|north|south)$/i, (m, a, d) => `${d} ${COMMON.test(a.split(' ')[0]) ? a.charAt(0).toLowerCase() + a.slice(1) : a}`);
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : null;
 }
 // "the food hall", "the Plaza", but "Gate C9" and "Concourse B" stay as they are.
-const GENERIC = /^(escalators?|elevators?|stairs|restrooms?|family restroom|food (hall|court)|baggage claim(?! \d)|moving walkways?|check-in|security|main|tsa|arrivals|departures|bus curb|curb|information desk|guest services|ticketing|exit|atrium|plaza|water feature|garage|covered walkway|west|east|north|south|hotel|taxi stand|taxis|rideshare|oversize|bag drop|security checkpoint)\b/i;
+const GENERIC = /^(escalators?|elevators?|stairs|restrooms?|family restroom|food (hall|court)|baggage claim(?! \d)|moving walkways?|check-in|security|main|tsa|arrivals|departures|bus curb|curb|information desk|guest services|ticketing|exit|water feature|garage|covered walkway|west|east|north|south|hotel|taxi stand|taxis|rideshare|oversize|bag drop|security checkpoint)\b/i;
+// named halls keep their capital, as the airport signs them: "the Atrium", "the Plaza"
+const NAMED = /^(Atrium|Plaza)\b/;
 const THE_END = /\b(connector|bridge|hub|walkway|rotunda|plaza|atrium|mezzanine|exit|entrance|stop|stand|pickup|counters|buses|shuttles|lanes|desk)$/i;
 // first words that are ordinary nouns, so "Rental car counters" reads "the rental car counters"
 const COMMON = /^(rental|rideshare|taxi|bus|buses|shuttles?|hotel|parking|cell|baggage|oversize|security|ticket|restrooms?|family|nursing|lost|currency|water|food|information|guest|airline|curb|ride|app|passenger|departures|arrivals|ground|public|main|central|east|west|north|south|hourly|daily|economy)$/i;
@@ -450,7 +453,7 @@ function mid(s) {
   if (!s) return s;
   if (/^the /.test(s)) return s;
   if (/^The /.test(s)) return 'the ' + s.slice(4);
-  if (/^(Uber|Lyft)\b/.test(s)) return 'the ' + s;
+  if (/^(Uber|Lyft)\b/.test(s) || NAMED.test(s)) return 'the ' + s;
   // "Baggage Claim" reads "the baggage claim": the whole common-noun part goes lower case
   if (GENERIC.test(s)) { const w = s.match(GENERIC)[0]; return 'the ' + (/^[A-Z][a-z]/.test(s) ? w.toLowerCase() + s.slice(w.length) : s); }
   if (!THE_END.test(s.split(',')[0]) || /^(Gate|Door)s?\b/.test(s)) return s;
@@ -859,7 +862,7 @@ function stepsFor(st, hops, cx) {
     const k = B.poi && B.poi.k;
     const text = k === 'baggage' ? `Pick up your bags at ${B.label}` : (k === 'checkin' || k === 'bagdrop') ? `Check your bag at ${B.label}` : `Stop at ${mid(B.label)}`;
     out.push({kind: 'via', icon: k === 'baggage' || k === 'bagdrop' ? 'luggage' : k === 'checkin' ? 'ticket' : 'map-pin', text,
-      sub: B.note || '', m: 0, sec: 0, level: B.level, pts: [[B.lat, B.lon]], at: [B.lat, B.lon]});
+      sub: B.note ? `${B.note.b} ${B.note.t}` : '', m: 0, sec: 0, level: B.level, pts: [[B.lat, B.lon]], at: [B.lat, B.lon]});
   }
   cx.sideOut = side;
   return out;
@@ -899,33 +902,34 @@ function recompute(st) {
   if (!st.A && fromKey === '@here') {
     fromKey = defaultFrom(Object.assign({}, st, {manual: null, gpsHere: null}));
     st.A = resolve(st, fromKey);
-    if (st.A) st.notes.push(`Showing the way from ${st.A.label} — set your spot for directions from where you are`);
+    if (st.A) st.notes.push({b: 'No spot set.', t: `Showing the way from ${mid(st.A.label)}; set your spot to start from where you are.`});
   }
   st.B = resolve(st, st.to);
   st.V = (st.via || []).map(k => resolve(st, k)).filter(Boolean);
   st.wait = waitFor(st);
   st.r = st.A && st.B && !st.wait ? buildRoute(st) : null;
   if (!st.wait) [st.A, ...st.V, st.B].forEach((e, i) => { const n = e && (i === 0 && e.noteFrom || e.note); if (n) st.notes.push(n); });
-  if (st.r && st.r.fell) st.notes.push('No step-free way found; this route uses stairs or an escalator.');
-  st.notes = [...new Set(st.notes)];
-  st.err = !st.A ? (st.from === '@arr' || st.from === '@dep' ? 'No flight of yours uses this airport on this trip.' : 'Couldn’t find where to start. Pick your spot below.')
-    : !st.B ? (/^@(arr|dep|bag)$/.test(st.to) ? 'No flight of yours uses this airport on this trip.' : 'Couldn’t find that place on this map.')
-    : !st.r && !st.wait ? 'No walking route between these two points in the map data.' : null;
+  if (st.r && st.r.fell) st.notes.push({b: 'No step-free way.', t: 'This route uses stairs or an escalator.'});
+  const seen = new Set();
+  st.notes = st.notes.filter(n => !seen.has(n.b + n.t) && seen.add(n.b + n.t));
+  const none = {b: 'No flight here.', t: 'None of your flights on this trip uses this airport.'};
+  st.err = !st.A ? (st.from === '@arr' || st.from === '@dep' ? none : {b: 'Start not found.', t: 'Pick your spot below.'})
+    : !st.B ? (/^@(arr|dep|bag)$/.test(st.to) ? none : {b: 'Place not found.', t: 'It isn’t on this map.'})
+    : !st.r && !st.wait ? {b: 'No walking route.', t: 'The map data doesn’t join these two points.'} : null;
   if (st.sel >= (st.r ? st.r.steps.length : 0)) st.sel = 0;
   st.dc = null;
 }
 // Both ends fell back to the same stand-in spot (neither gate posted yet): no route to draw,
-// so say how far apart gates can be here instead. {text, sec} or null.
+// so say how far gates are from it instead. A callout note {b, t}, or null.
 function waitFor(st) {
   const A = st.A, B = st.B;
   if (!A || !B || st.V.length || A.node !== B.node || (A.kind !== 'hub' && B.kind !== 'hub')) return null;
-  if (B.key === '@bag') return {text: 'This updates when the carousel posts.', sec: 0};
+  if (B.key === '@bag') return {b: 'Directions show up', t: 'when the carousel posts.'};
   const d = search(st.P, [B.node], opts(st), null).dist;
   let mx = 0;
   for (const g of st.P.gates) { const x = d.get(g.node); if (x != null && x > mx) mx = x; }
-  const m = minN(mx);
-  return mx > 0 ? {sec: 2 * mx, text: `Every gate here is within ${m} min of ${B.label}, so allow up to ${2 * m} min between gates. This updates when the gates post.`}
-    : {sec: 0, text: 'This updates when the gates post.'};
+  return mx > 0 ? {b: `Every gate is within ${minN(mx)} min of ${mid(B.label)}.`, t: 'Directions show up when the gates post.'}
+    : {b: 'Directions show up', t: 'when the gates post.'};
 }
 const sig = e => e ? `${e.kind}|${e.node}|${e.label}` : '';
 function hashFor(st) {
@@ -958,70 +962,76 @@ function arriveAt(st) {
   const L = st.A && st.A.key === '@arr' && st.A.leg;
   // about 10 min from touchdown to walking off the plane
   if (L && L.arr.time) { const t = T(L.arr.time) + 10 * 60000; if (t > start) start = t; }
-  return new Date(start + (st.r ? st.r.sec * 1000 : 0));
+  // in the whole minutes the walk is shown in, so "11 min" from 12:51 reads 1:02, as the connection does
+  return new Date(start + (st.r ? minN(st.r.sec) * 60000 : 0));
 }
 function sumParts(st) {
   const r = st.r;
   const what = r.hasSec ? 'with security' : r.hasTrain ? 'with the train' : 'walking';
-  // each part stays on one line, so a wrap only happens between parts
-  const keep = t => String(t).replace(/ /g, '\u00a0');
-  return {min: `${minN(r.sec)} min`, line: [what, r.walkM >= 15 ? N.distText(r.walkM) : null, `get there ${N.time(arriveAt(st), st.code)}`].filter(Boolean).map(keep).join(' · ')};
+  return {min: `${minN(r.sec)} min`, line: join([what, r.walkM >= 15 ? N.distText(r.walkM) : null, `get there ${N.time(arriveAt(st), st.code)}`])};
 }
 function fromText(A) {
   if (!A) return 'Set where you start';
   if (A.kind === 'here') return /^near /i.test(A.label) ? `From you, ${A.label.charAt(0).toLowerCase()}${A.label.slice(1)}` : `From you at ${A.label}`;
   return `From ${A.label}`;
 }
+// The connection scale every screen uses: spare = minutes from reaching the gate to its doors
+// closing, ok 20+, tight 8-19, risk under 8. N.connection rates the plan; this rates the same
+// spare once the clock has moved it (you're later off the plane, or walking somewhere first).
+const rate = s => s >= 20 ? 'ok' : s >= 8 ? 'tight' : 'risk';
+const LABEL = {ok: 'Comfortable', tight: 'Tight', risk: 'At risk'};
+// each part stays on one line, so a wrap only happens between parts
+const keep = t => String(t).replace(/ /g, '\u00a0');
+const join = a => a.filter(Boolean).map(keep).join(' · ');
+// "Doors close 1:00p · ~35 min to spare", or when short "Reach gate ~1:04p · doors close 1:00p"
+function doorsText(st, L, reach, spare, level) {
+  const dt = N.time(L.doors, st.code);
+  return {line: join(level === 'risk' ? [`Reach gate ~${N.time(new Date(reach), st.code)}`, `doors close ${dt}`] : [`Doors close ${dt}`, `~${N.dur(spare)} to spare`]),
+    short: join([`Doors ${dt}`, spare >= 0 ? `${N.dur(spare)} spare` : `${N.dur(spare)} short`])};
+}
+// Walking to the gate (or somewhere first): when you get there against the doors closing.
 function boarding(st) {
   const L = st.fl && st.fl.dep;
-  if (!st.r || !st.B || !L || !L.board || L.canceled || st.B.side === 'land') return null;
+  if (!st.r || !st.B || !L || !L.doors || L.canceled || st.B.side === 'land') return null;
   if (st.B.key === '@bag' || st.B.key === '@arr') return null;
-  const now = N.now().getTime(), bt = T(L.board);
-  if (isNaN(bt) || bt - now > 18 * 3600000 || bt < now - 30 * 60000) return null;
+  const now = N.now().getTime(), dc = T(L.doors);
+  if (isNaN(dc) || dc - now > 18 * 3600000 || dc < now - 5 * 60000) return null;
   let back = 0;
   const dep = st.depE;
   if (dep && st.B.node !== dep.node) {
     const p = pathBetween(st.P, st.B.node, dep.node, opts(st));
     if (p) back = p.sec;
   }
-  const spare = Math.floor((bt - arriveAt(st).getTime() - back * 1000) / 60000);
-  const t = N.time(L.board, st.code);
-  const tone = spare >= 15 ? 'ok' : spare >= 0 ? 'tight' : 'risk';
-  let text = spare >= 0 ? `Boarding ${t} · ${spare} min to spare`
-    : `Boarding ${t} · ${-spare} min after boarding starts — doors close ${N.time(L.doors, st.code)}`;
-  if (back >= 60 && spare >= 0) text += `, counting the ${minN(back)} min walk to ${dep.label}`;
-  return {tone, text};
+  const reach = arriveAt(st).getTime() + back * 1000;
+  const spare = Math.floor((dc - reach) / 60000), level = rate(spare);
+  return {level, ...doorsText(st, L, reach, spare, level),
+    foot: [`Boarding ${N.time(L.board, st.code)}`, back >= 60 ? `${minN(back)} min more to ${dep.label}` : null]};
 }
+// Arrival gate to departure gate: N.connection's figures, moved on by the clock once you're
+// off the plane later than planned (the walk then starts now, not at landing + 10).
 function connInfo(st) {
   const a = st.fl && st.fl.arr, b = st.fl && st.fl.dep;
   if ((!st.r && !st.wait) || !a || !b || a.dir !== b.dir || b.seq !== a.seq + 1) return null;
   if (!st.A || st.A.key !== '@arr' || !st.B || st.B.key !== '@dep') return null;
-  const walk = minN(st.r ? st.r.sec : st.wait.sec), ground = N.mins(a.arr.time, b.dep.time);
-  const free = N.mins(N.addMin(a.arr.time, 10 + walk), b.board);
-  // the same scale as boarding(): at the gate 15+ min before boarding is on track
-  const spare = free != null ? free : ground != null ? ground - 10 - walk - 40 : null;
-  const level = a.canceled || b.canceled ? 'risk' : spare == null ? 'tight' : spare >= 15 ? 'ok' : spare >= 0 ? 'tight' : 'risk';
+  if (b.departed || b.dep.actual || b.state === 'past') return null;
+  let c = null;
+  try { c = N.connection(a.dir); } catch (e) { N.report(e, 'nav connection'); }
+  if (!c || c.a.id !== a.id || c.b.id !== b.id) return null;
+  const walk = c.walk.min * 60000, reach0 = T(c.a.arr.time) + 10 * 60000 + walk;
+  const reach = Math.max(reach0, N.now().getTime() + walk), late = Math.ceil((reach - reach0) / 60000);
+  const spare = c.spare - late, level = a.canceled || b.canceled ? 'risk' : late ? rate(spare) : c.level;
   const gt = (e, g) => e.kind === 'gate' && e.ref ? e.ref : g || 'gate TBA';
-  // gates not posted: the walk is the longest it could be, so the spare time is a floor
-  const t = b.board && N.time(b.board, st.code);
-  const wait = st.wait && t && free != null ? (free >= 0 ? `Boarding ${t} · at least ${free} min to spare`
-    : `Boarding ${t} · if the gates are far apart, you reach it ${-free} min after boarding starts`) : null;
-  return {head: `Arrive ${gt(st.A, a.arr.gate)} → Depart ${gt(st.B, b.dep.gate)}`, ground, level, wait};
+  return {level, ...doorsText(st, b, reach, spare, level), ground: c.ground,
+    head: {a: `Arrive ${gt(st.A, a.arr.gate)}`, b: `Depart ${gt(st.B, b.dep.gate)}`}};
 }
-const TONE = {ok: 'On track', tight: 'Tight', risk: 'At risk'};
-// the folded card's line: no "counting the walk" or "doors close" tail
-const shortLine = t => String(t || '').replace(/, counting .*$/, '').replace(/ — doors close .*$/, '');
-// The block under the airport name: your connection, or boarding for the gate you're walking to.
+// The block under the airport name: your connection, or the doors for the gate you're walking to.
 function planInfo(st) {
   if ((!st.r && !st.wait) || st.follow) return null;
   if ((st.B && st.B.key === '@bag') || st.V.some(v => v.key === '@bag')) return bagInfo(st);
-  const c = connInfo(st), bd = boarding(st);
-  if (!c && !bd) return null;
-  const checked = checkedText(st, 'Gates');
-  const tone = bd ? bd.tone : c.level;
-  const line = bd ? bd.text : c.wait ? c.wait : c.ground != null ? `${c.ground} min between flights` : st.r ? `${minN(st.r.sec)} min walk` : 'Gates not posted yet';
-  const foot = [checked, (bd || c && c.wait) && c && c.ground != null ? `${c.ground} min between flights` : null].filter(Boolean).join(' · ');
-  return {head: c ? c.head : null, tone, word: TONE[tone], line, foot};
+  const c = connInfo(st), p = c || boarding(st);
+  if (!p) return null;
+  const foot = join([checkedText(st, 'Gates'), ...(c ? [c.ground != null ? `${N.dur(c.ground)} between flights` : null] : p.foot)]);
+  return {head: c ? c.head : null, tone: p.level, word: LABEL[p.level], line: p.line, short: p.short, foot};
 }
 // Walking to baggage claim: when the flight lands and which carousel, as last checked.
 function bagInfo(st) {
@@ -1031,7 +1041,7 @@ function bagInfo(st) {
   const done = L.landed || L.arr.actual, past = L.arr.time && N.now().getTime() >= T(L.arr.time);
   const word = !t ? 'Bags' : done ? `Landed ${t}` : past ? `Due ${t}` : `Lands ${t}`;
   const line = L.arr.baggage ? `Bags on carousel ${L.arr.baggage}` : 'Carousel not posted yet';
-  return {head: null, tone: 'info', word, line, foot: checkedText(st, 'Carousel')};
+  return {head: null, tone: 'info', word, line, short: line, foot: checkedText(st, 'Carousel')};
 }
 // "Gates checked 4:12p", in this airport's time like every other time on the screen.
 function checkedText(st, what) {
@@ -1077,14 +1087,14 @@ function topHtml(st) {
   // with a route on screen the card folds to one line so the map has the room; tap it for the rest
   if (st.to && pl && !st.topOpen) {
     return h`<button class="na-tc" data-act="topx" aria-expanded="false">
-      <b>${st.code}</b><i class="na-tone ${pl.tone}" data-k="tone">${pl.word}</i><span data-k="boards">${shortLine(pl.line)}</span>${icon('chevron-down')}
+      <b>${st.code}</b><i class="na-tone ${pl.tone}" data-k="tone">${pl.word}</i><span data-k="boards">${pl.short}</span>${icon('chevron-down')}
     </button>${st.locating ? whereRow(st) : ''}`;
   }
   const showWhere = !st.to || st.fix || st.manual || st.locating;
   return h`${st.to && pl ? h`<button class="na-ey na-eyb" data-act="topx" aria-expanded="true" aria-label="${`${st.code} ${st.name}, hide flight details`}"><b>${st.code}</b><span>${st.name}</span>${icon('chevron-up')}</button>`
       : h`<div class="na-ey"><b>${st.code}</b><span>${st.name}</span></div>`}
     ${pl ? h`<div class="na-cn">
-      ${pl.head ? h`<span class="na-cnt" data-k="conn">${pl.head}</span>` : ''}
+      ${pl.head ? h`<span class="na-cnt"><span data-k="cnA">${pl.head.a}</span>${icon('arrow-right')}<span data-k="cnB">${pl.head.b}</span></span>` : ''}
       <span class="na-cnb"><i class="na-tone ${pl.tone}" data-k="tone">${pl.word}</i><span data-k="board">${pl.line}</span></span>
       <span class="na-cnw" data-k="foot">${pl.foot}</span>
     </div>` : ''}
@@ -1118,6 +1128,8 @@ function cardHtml(st, s, i) {
     </span>
   </button>`;
 }
+// A callout: its lead phrase in bold, then the rest. Not rose: none of these is a risk to you.
+const noteHtml = (n, ic, cls = '') => h`<div class="${`co${cls} na-note`}">${icon(ic)}<span><b>${n.b}</b> ${n.t}</span></div>`;
 function routeHtml(st) {
   const A = st.A, B = st.B, r = st.r;
   const head = h`<div class="na-rh">
@@ -1127,11 +1139,11 @@ function routeHtml(st) {
     <button class="na-ib" data-act="close" aria-label="Close directions">${icon('x')}</button>
   </div>`;
   if (!r && st.wait) {
-    return h`${head}<div class="co na-note">${icon('clock')}<span>${st.wait.text}</span></div>
+    return h`${head}${noteHtml(st.wait, 'clock')}
       <div class="na-acts"><button class="btn alt" data-act="close">Back to the map</button></div>`;
   }
   if (!r) {
-    return h`${head}<div class="co rose na-note">${icon('alert-triangle')}<span>${st.err}</span></div>
+    return h`${head}${noteHtml(st.err, 'alert-circle', ' plain')}
       <div class="na-acts"><button class="btn alt" data-act="pick">${icon('map-pin')}Set my spot</button><button class="btn alt" data-act="close">Back to the map</button></div>`;
   }
   const dest = B.lat != null ? {lat: B.lat, lon: B.lon} : null;
@@ -1142,7 +1154,7 @@ function routeHtml(st) {
       <button class="btn na-go" data-act="start">${icon('player-play')}Start</button>
     </div>
     <div class="na-cards" data-hscroll role="list" aria-label="Steps">${r.steps.map((s, i) => cardHtml(st, s, i))}</div>
-    ${st.notes.map(n => h`<div class="co na-note">${icon('alert-circle')}<span>${n}</span></div>`)}
+    ${st.notes.map(n => noteHtml(n, 'alert-circle'))}
     <div class="na-acts">
       <button class="na-tg" data-act="sf" aria-pressed="${String(!!st.sf)}">${icon('accessible')}Step-free</button>
       ${dest ? h`<a class="na-tg" href="${N.mapsUrl(dest, 'w')}" target="_blank" rel="noopener">${icon('external-link')}Apple Maps</a>` : ''}
@@ -1205,7 +1217,7 @@ function resultsHtml(st) {
   const tips = (P.nav.tips || []).slice(0, 3);
   return h`${pre.length ? h`<h3 class="na-h">Your routes here</h3>${pre.map(x => h`<button class="na-row" data-act="preset" data-arg="${x.id}">
       <span class="na-ri c-${catOf(x.B)}">${icon(icOf(x.B))}</span>
-      <span class="na-rtx"><b>${x.label}</b><small>${x.sub || `${x.A.label} → ${x.B.label}`}</small></span>
+      <span class="na-rtx"><b>${x.label}</b><small>${x.sub || `${x.A.label} to ${mid(x.B.label)}`}</small></span>
       ${x.min != null ? h`<span class="na-min">${x.min}<small>min</small></span>` : ''}</button>`)}` : ''}
     ${near.length ? h`<h3 class="na-h">Nearest ${from.label}</h3>${near.map(x => rowHtml(st, x.p, dm))}` : ''}
     ${tips.length ? h`<h3 class="na-h">Good to know</h3><ul class="na-tips">${tips.map(t => h`<li>${t}</li>`)}</ul>` : ''}
@@ -1218,12 +1230,12 @@ function hubSub(A, B, same) {
   const why = e => got(e) ? `${what(e)} ${got(e)} isn’t on this map` : `${what(e)} not posted yet`;
   const ha = A.kind === 'hub', hb = B.kind === 'hub';
   if (same) return ha && hb ? (got(A) && got(B) ? 'Neither gate is on this map' : 'Gates not posted yet') : why(ha ? A : B);
-  if (ha && hb) return `${!got(A) && !got(B) && what(A) !== what(B) ? `${what(A)} and ${what(B).toLowerCase()} not posted yet` : 'Not posted yet'} · ${A.label} → ${B.label}`;
+  if (ha && hb) return `${!got(A) && !got(B) && what(A) !== what(B) ? `${what(A)} and ${what(B).toLowerCase()} not posted yet` : 'Not posted yet'} · from ${mid(A.label)} to ${mid(B.label)}`;
   if (ha) return `${why(A)} · from ${A.label}`;
   if (hb) return `${why(B)} · to ${B.label}`;
   return null;
 }
-// "From the atrium · no arrival gate yet" (kept short enough for one line)
+// "From the Atrium · no arrival gate yet" (kept short enough for one line)
 function standSub(A) {
   const g = A.leg ? (A.key === '@arr' ? A.leg.arr.gate : A.leg.dep.gate) : null;
   return `From ${mid(A.label)} · ${g ? `gate ${g} not on map` : `no ${A.key === '@arr' ? 'arrival ' : ''}gate yet`}`;
@@ -1352,8 +1364,24 @@ function shellHtml(st) {
 
 // ---------- painting ----------
 const $ = (st, s) => st.root ? N.$(s, st.root) : null;
-function paintTop(st) { const e = $(st, '.na-top'); if (e) e.innerHTML = topHtml(st); }
-function paintFloors(st) { const e = $(st, '.na-fl'); if (e) e.innerHTML = floorsHtml(st); }
+function paintTop(st) { const e = $(st, '.na-top'); if (e) e.innerHTML = topHtml(st); riskMark(st, planInfo(st)); }
+function paintFloors(st) { const e = $(st, '.na-fl'); if (e) { e.innerHTML = floorsHtml(st); fitFloors(st); } }
+// The floor list shows whole buttons only, as many as fit between the top card and the map buttons,
+// keeps the floor you're on in view, and fades the edge that has more floors past it.
+function fitFloors(st) {
+  const fl = $(st, '.na-fl'), rail = $(st, '.na-rail'), ctl = $(st, '.na-ctl');
+  if (!fl || !rail || !fl.children.length) return;
+  const n = fl.children.length, room = rail.clientHeight - (ctl ? ctl.offsetHeight + 8 : 0);
+  const fit = Math.max(2, Math.floor((room + 1) / 45));
+  fl.style.maxHeight = fit < n ? `${fit * 45 - 1}px` : '';
+  const on = N.$('.na-lv.on', fl);
+  if (on && fit < n && (on.offsetTop < fl.scrollTop || on.offsetTop + 44 > fl.scrollTop + fl.clientHeight)) fl.scrollTop = on.offsetTop - (fit > 2 ? 45 : 0);
+  fadeFloors(fl);
+}
+function fadeFloors(fl) {
+  fl.classList.toggle('fu', fl.scrollTop > 2);
+  fl.classList.toggle('fd', fl.scrollTop + fl.clientHeight < fl.scrollHeight - 2);
+}
 function paintCtl(st) { const e = $(st, '.na-ctl'); if (e) e.innerHTML = ctlHtml(st); }
 function paintSheet(st) {
   const sh = $(st, '.na-sh'), c = $(st, '.na-shc');
@@ -1415,13 +1443,13 @@ function colors(el) {
 }
 const corrW = z => Math.max(2, Math.min(24, 3.2 * Math.pow(2, z - 17)));
 const gateR = z => z >= 19 ? 6.5 : z >= 18 ? 5 : 3.5;
-// The clear part of the map: 16px under the top card, 16px over the sheet, 24px in from the left,
-// and clear of the button rail on the right.
+// The clear part of the map: 16px under the top card, 40px over the sheet (a pin at the edge then
+// clears the sheet and the map credit), 24px in from the left, and clear of the button rail on the right.
 function pad(st) {
   const top = $(st, '.na-top'), sh = $(st, '.na-sh'), rail = $(st, '.na-rail'), box = $(st, '.na-map');
   const tb = top ? top.offsetTop + top.offsetHeight : 0, sb = sh ? sh.offsetHeight : 0;
   const rl = rail && box && rail.offsetWidth ? box.offsetWidth - rail.offsetLeft + 8 : 24;
-  return {paddingTopLeft: [24, tb + 16], paddingBottomRight: [Math.max(24, rl), sb + 16]};
+  return {paddingTopLeft: [24, tb + 16], paddingBottomRight: [Math.max(24, rl), sb + 40]};
 }
 // Put ll in the middle of the part of the map you can see (between the top card, the sheet and the buttons).
 function centerOn(st, ll, z, how) {
@@ -1979,7 +2007,12 @@ const act = fn => (el, ev, ctx, arg) => { const st = S; if (!st || st.dead || !s
 const actions = {
   locate: act(st => locate(st, false)),
   grab: act(st => { if (st.swiped && Date.now() - st.swiped < 500) return; setFull(st, !st.full); }),
-  topx: act(st => { st.topOpen = !st.topOpen; paintTop(st); const b = $(st, '[data-act="topx"]'); if (b) b.focus({preventScroll: true}); }),
+  topx: act(st => {
+    st.topOpen = !st.topOpen; paintTop(st);
+    const b = $(st, '[data-act="topx"]'); if (b) b.focus({preventScroll: true});
+    // the card grew or shrank over the map: keep the whole route in the clear part, unless you've moved the map
+    if (st.r && !st.userMoved) requestAnimationFrame(() => { if (!st.dead) fitRoute(st, true); });
+  }),
   compass: act(st => toggleCompass(st)),
   lvl: act((st, arg) => setLevel(st, +arg)),
   fit: act(st => { st.userMoved = false; fitRoute(st, true); }),
@@ -2101,6 +2134,7 @@ function mount(ctx, view) {
   const root = N.$('.na', view);
   if (!root) return () => { st.dead = true; if (S === st) S = null; };
   st.root = root;
+  riskMark(st, planInfo(st));
   const offs = [];
   // keep the floating parts clear of the offline strip, the top card and the sheet
   const strip = N.$('#strip');
@@ -2111,6 +2145,7 @@ function mount(ctx, view) {
     const top = $(st, '.na-top'), sh = $(st, '.na-sh');
     if (top) root.style.setProperty('--na-toph', `${top.offsetHeight}px`);
     if (sh) root.style.setProperty('--na-sheeth', `${sh.offsetHeight}px`);
+    fitFloors(st);
   };
   measure();
   if (strip && window.MutationObserver) {
@@ -2126,6 +2161,7 @@ function mount(ctx, view) {
   // step cards: swiping one shows that step
   const onScroll = ev => {
     const sc = ev.target;
+    if (sc.classList && sc.classList.contains('na-fl')) { fadeFloors(sc); return; }
     if (!sc.classList || !sc.classList.contains('na-cards') || st.progScroll) return;
     clearTimeout(st.scT);
     st.scT = setTimeout(() => {
@@ -2307,9 +2343,14 @@ function paintLive(st) {
   }
   const pl = planInfo(st);
   if (!pl) return;
-  if (pl.head) set('conn', pl.head);
-  set('board', pl.line); set('boards', shortLine(pl.line)); set('foot', pl.foot); set('tone', pl.word);
+  if (pl.head) { set('cnA', pl.head.a); set('cnB', pl.head.b); }
+  set('board', pl.line); set('boards', pl.short); set('foot', pl.foot); set('tone', pl.word);
   const te = st.root && N.$('[data-k="tone"]', st.root);
   if (te) te.className = `na-tone ${pl.tone}`;
+  riskMark(st, pl);
+}
+// Rose on the map (the gate pin) only when you're really at risk of missing the doors.
+function riskMark(st, pl) {
+  if (st.root && !st.follow) st.root.classList.toggle('risk', !!pl && pl.tone === 'risk');
 }
 })();

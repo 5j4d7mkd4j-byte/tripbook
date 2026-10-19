@@ -157,6 +157,16 @@
 .cx-h .cx-big{display:flex;align-items:baseline;gap:8px;margin-top:14px}
 .cx-h .cx-big .dp{font-size:112px}
 .cx-h .cx-big .cx-u{font-size:32px;letter-spacing:0}
+.cx-h .cx-big .cx-gt{display:flex;align-items:baseline;gap:8px}
+.cx-h .cx-big .cx-gt .tn~.tn{margin-left:10px}
+/* Over an hour reads "1h 15m", each number tight to its unit. */
+.cx-h .cx-big.hm .dp{font-size:84px}
+.cx-h .cx-big.hm .cx-u{font-size:28px}
+.cx-h .cx-big.hm .cx-gt{gap:4px}
+/* With the concourse diagram beside it the figure steps down, so it never meets the A gate. */
+.cx-h.has-hub .cx-big .tn{font-size:100px}
+.cx-h.has-hub .cx-big.hm .tn{font-size:70px}
+.cx-h.has-hub .cx-big.hm .cx-u{font-size:24px}
 .cx-h .cx-big .cx-unk{color:var(--onband)}
 .cx-h .cx-big.was .dp{opacity:.5}
 .cx-h .cx-big.was .tn{text-decoration:line-through;text-decoration-thickness:6px}
@@ -237,7 +247,19 @@
 .st .st-li.bad .i{color:var(--amt)}
 .st .st-add{margin-top:2px}
 
-.fl .chip.rose .dot,.fx .chip.rose .dot,.cx-h .chip.rose .dot,.cx .chip.rose .dot{background:var(--robt)}
+.fl .dot.amb,.fx .dot.amb,.fx-h .dot.amb,.cx .dot.amb{background:var(--warn)}
+.fl .dot.bad,.fx .dot.bad,.fx-h .dot.bad,.cx .dot.bad{background:var(--ro)}
+.fl .chip.rose .dot,.fx .chip.rose .dot,.fx-h .chip.rose .dot,.cx-h .chip.rose .dot,.cx .chip.rose .dot{background:var(--robt)}
+/* The stale-data chip is the one place to check again: a full-size button. */
+.fl-hero .fl-ref{height:44px;border:0;border-radius:22px;padding:0 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.fl-hero .fl-ref b{font-weight:800}
+.fl .fl-done{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--mu)}
+.fl .fl-done .i{font-size:16px;color:var(--ok)}
+/* A flown leg has no seat cell: two columns. */
+.fl .fl-meta.two{grid-template-columns:minmax(0,1.4fr) minmax(0,2fr)}
+/* Boarding has started on the onward flight: caution ring, ink text. */
+.cx .co.cx-warn{background:transparent;box-shadow:inset 0 0 0 1.5px var(--warn);color:var(--ink)}
+.cx .co.cx-warn .i{color:var(--warn)}
 .fx .fx-times.off .fx-t{color:var(--mu);text-decoration:line-through;text-decoration-thickness:3px}
 .fx .fx-times.off .fx-dash span{opacity:.4}
 .fx .tile.fx-off b{color:var(--mu)}

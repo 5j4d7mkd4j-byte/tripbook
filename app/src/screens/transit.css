@@ -58,6 +58,11 @@
 .tr-in{font-size:14px;font-weight:700}
 .tr-lt{display:block;font-size:18px;font-weight:800;line-height:1.25;margin-top:6px}
 .tr-lp{margin:8px 0 0;font-size:13px;line-height:1.45}
+/* which way the time is for: the pick's line, then the other way's time under it */
+.tr-lm{display:flex;gap:8px;align-items:flex-start;margin:8px 0 0;font-size:14px;line-height:1.4}
+.tr-lm .i{font-size:18px;flex:none;margin-top:1px}
+.tr-lm b{font-weight:800}
+.tr-lalt{margin-top:4px}
 
 /* traffic and weather */
 /* 1.5px border + 10.5px = the hotel row's 12px, so the icons and text line up */
@@ -67,8 +72,8 @@
 .tr-traffic .tr-foot{margin-top:4px}
 .tr-wx,.tr-wxa{display:flex;gap:10px;align-items:flex-start;margin:12px 0 0;padding-top:12px;border-top:1.5px solid var(--ln);font-size:13px;font-weight:600;line-height:1.4}
 .tr-wx .i,.tr-wxa .i{font-size:18px;color:var(--eb);margin-top:-1px}
-.tr-wxa{color:var(--rot)}
-.tr-wxa .i{color:var(--rot)}
+/* a weather alert is a caution: ink words, amber sign */
+.tr-wxa .i{color:var(--warn)}
 
 /* options */
 /* icon | name and details | minutes | chevron; the best pick's note runs under the last three */
@@ -80,7 +85,8 @@
 .tr-opn{display:block}
 .tr-opn b{display:block;font-size:15px;font-weight:800;line-height:1.3}
 .tr-opm small{display:block;font-size:13px;color:var(--mu);margin-top:2px;line-height:1.35}
-.tr-opm .tr-warn{display:flex;align-items:center;gap:5px;color:var(--rot);font-weight:600}
+.tr-opm .tr-warn{display:flex;align-items:center;gap:5px;color:var(--ink);font-weight:600}
+.tr-warn .i{color:var(--warn)}
 .tr-best{grid-column:2/-1;display:block;margin-top:10px}
 .tr-best b{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 10px 0 8px;border-radius:var(--r-pill);background:var(--ink);color:var(--page);font-size:12px;font-weight:800;white-space:nowrap}
 .tr-best b .i{font-size:14px}
@@ -214,8 +220,12 @@
 .tr-num{width:32px;height:32px;border-radius:50%;background:var(--sheet);box-shadow:inset 0 0 0 2px var(--ink);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex:none}
 .tr-place b{display:block;font-size:15px;font-weight:800}
 .tr-place small{display:block;font-size:13px;color:var(--mu);margin-top:1px}
-.tr-place .tr-hrs.open{color:var(--ok)}
-.tr-place .tr-hrs.closing{color:var(--rot)}
+/* open or not as Food shows it: a dot, then the words in ink; caution dots are amber */
+.tr-place .tr-hrs{display:flex;align-items:center;gap:6px;margin-top:3px;font-weight:700;color:var(--ink);white-space:nowrap}
+.tr-hd{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}
+.tr-hrs.closing .tr-hd,.tr-hrs.later .tr-hd{background:var(--warn)}
+.tr-place .tr-hrs.closed{color:var(--mu)}
+.tr-hrs.closed:not(.later) .tr-hd{background:var(--mu)}
 .tr-pd{flex:none;text-align:right}
 .tr-pd b{font-size:15px;white-space:nowrap}
 .tr-dp.tr-he{font-size:44px}

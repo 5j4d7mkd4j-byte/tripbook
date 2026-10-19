@@ -27,7 +27,7 @@ const pressed = v => v ? 'true' : 'false';
 const safe = (fn, d) => { try { const v = fn(); return v == null ? d : v; } catch (e) { return d; } };
 const legs = () => safe(() => N.legs(), []);
 const leave = dir => safe(() => N.leave(dir), null);
-const legName = l => `${l.flight || 'Flight'} · ${l.from || '?'} → ${l.to || '?'}`;
+const legName = l => `${N.flightNo(l)} · ${l.from || '?'} → ${l.to || '?'}`;
 const legDay = l => safe(() => N.date(l.dep && l.dep.sched || (l.date ? l.date + 'T16:00:00Z' : null), l.from), '—');
 const T = iso => iso ? new Date(iso).getTime() : NaN;
 
@@ -345,7 +345,7 @@ function peopleHtml() {
 function seatsHtml() {
   const ls = legs();
   if (!ls.length) {
-    return h`<div class="co plain">${icon('info-circle')}<span>${N.data.trip ? 'This trip has no flights listed yet.' : 'Seats can be added once the trip has loaded on this phone.'}</span></div>`;
+    return h`<div class="co plain">${icon('info-circle')}<span>${N.data.trip ? h`<b>No flights yet.</b> This trip has none listed.` : h`<b>Trip not loaded.</b> Seats can be added once it has loaded on this phone.`}</span></div>`;
   }
   const n = seatCount();
   return h`${ls.map(l => {
@@ -609,7 +609,7 @@ function leaveLine(lv, from, buf) {
   const ahead = N.mins(reach, lv.leg.dep.time);
   const drive = lv.source === 'traffic' ? `${lv.drive} min drive (with traffic)` : `${lv.drive} min drive`;
   return h`<div class="wl-lv"><b>${N.date(lv.at, ap)}: leave ${from} at <span class="tn">${N.time(lv.at, ap)}</span></b>
-    <span>${buf ? `That’s ${buf} min earlier than the plan. ` : ''}A ${drive} gets you to ${ap} at ${N.time(reach, ap)}, ${N.dur(ahead)} before ${lv.leg.flight} leaves at ${N.time(lv.leg.dep.time, ap)}.</span></div>`;
+    <span>${buf ? `That’s ${buf} min earlier than the plan. ` : ''}A ${drive} gets you to ${ap} at ${N.time(reach, ap)}, ${N.dur(ahead)} before ${N.flightNo(lv.leg)} leaves at ${N.time(lv.leg.dep.time, ap)}.</span></div>`;
 }
 function bufHtml() {
   const b = N.clamp(+N.prefs().leave_buffer || 0, 0, 60);
@@ -632,7 +632,7 @@ function bufHtml() {
 function lockHtml() {
   const off = !N.online();
   if (!S.ask) {
-    return h`${off ? h`<div class="co rose">${icon('wifi-off')}<span>You’re offline. Once locked, you can’t unlock until you have signal.</span></div>` : ''}
+    return h`${off ? h`<div class="co rose">${icon('wifi-off')}<span><b>You’re offline.</b> Once locked, you can’t unlock until you have signal.</span></div>` : ''}
       <button class="btn alt wl-wide${off ? ' wl-gap' : ''}" data-act="slock">${icon('lock')}Lock this phone</button>
       <p class="help">Locking hides your trip until you enter the passphrase again.</p>`;
   }
@@ -857,15 +857,15 @@ function freshHtml() {
   // Same cadence the strip uses (the cloud's own run.cadence_s when it is slower): 1, 10 or 60 min.
   const due = at ? T(at) + (+f.cadence || (f.window ? 600 : 3600)) * 1000 : 0;
   const next = due > N.now().getTime() ? ` Next check about ${N.time(new Date(due).toISOString(), zone())}.` : '';
-  return h`${ms.error ? h`<div class="co rose">${icon('alert-triangle')}<span>Couldn’t reach the update service (${ms.error}). Showing what this phone saved.</span></div>` : ''}
-    ${off ? h`<div class="co plain${ms.error ? ' wl-gap' : ''}">${icon('wifi-off')}<span>You’re offline. Checks start again when you have signal.</span></div>` : ''}
+  return h`${ms.error ? h`<div class="co rose">${icon('alert-triangle')}<span><b>Update failed.</b> Couldn’t reach the update service (${ms.error}). Showing what this phone saved.</span></div>` : ''}
+    ${off ? h`<div class="co plain${ms.error ? ' wl-gap' : ''}">${icon('wifi-off')}<span><b>You’re offline.</b> Checks start again when you have signal.</span></div>` : ''}
     <button class="btn wl-wide${ms.error || off ? ' wl-gap' : ''}" data-act="refresh"${attr(off, ' aria-disabled="true"')}>${icon('refresh')}Check now</button>
     <p class="help">Flights are checked every minute in the 3 hours before takeoff, every 10 minutes on travel days and hourly otherwise.${next}</p>`;
 }
 const FILE_ROWS = [
-  ['trip', 'plane', 'Flights & hotel', d => `${N.plural((d.legs || []).length, 'flight')}${d.updated_at ? ` · updated ${N.date(d.updated_at, 'NYC')}` : ''}`],
-  ['guide', 'building-airport', 'Airport guide', d => `${N.plural(Object.keys(d.airports || {}).length, 'airport')}${d.updated ? ` · updated ${N.date(String(d.updated).length === 10 ? d.updated + 'T16:00:00Z' : d.updated, 'NYC')}` : ''}`],
-  ['food', 'tools-kitchen-2', 'Food list', d => `${N.plural((d.places || []).length, 'place')}${d.collected_at ? ` · collected ${N.date(d.collected_at, 'NYC')}` : ''}`],
+  ['trip', 'plane', 'Flights & hotel', d => N.mline(N.plural((d.legs || []).length, 'flight'), d.updated_at && `updated ${N.date(d.updated_at, 'NYC')}`)],
+  ['guide', 'building-airport', 'Airport guide', d => N.mline(N.plural(Object.keys(d.airports || {}).length, 'airport'), d.updated && `updated ${N.date(String(d.updated).length === 10 ? d.updated + 'T16:00:00Z' : d.updated, 'NYC')}`)],
+  ['food', 'tools-kitchen-2', 'Food list', d => N.mline(N.plural((d.places || []).length, 'place'), d.collected_at && `collected ${N.date(d.collected_at, 'NYC')}`)],
 ];
 function filesHtml() {
   const z = zone();
@@ -1029,13 +1029,14 @@ function calPlan() {
   return {inc, out};
 }
 // One event per flight. Only flight facts go in: never names, codes or seats.
+const fno = l => N.flightNo(l).replace(/\u00a0/g, ' ');
 function buildIcs(list) {
   const stamp = icsTime(N.now());
   const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//nyc.//Trip flights//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
   for (const l of list) {
     const dT = termText(l.dep.terminal).replace(/\u00a0/g, " "), aT = termText(l.arr.terminal).replace(/\u00a0/g, " ");
     const desc = [
-      `American Airlines ${l.flight}, ${apCity(l.from)} (${l.from}) to ${apCity(l.to)} (${l.to}).`,
+      `American Airlines ${fno(l)}, ${apCity(l.from)} (${l.from}) to ${apCity(l.to)} (${l.to}).`,
       `Departs ${N.time(l.dep.sched, l.from)} ${apCity(l.from)} time${dT ? ` from ${dT}` : ''}. Arrives ${N.time(l.arr.sched, l.to)} ${apCity(l.to)} time${aT ? ` at ${aT}` : ''}.`,
       'Gates change often: check the nyc. app or the American Airlines app before you head to the gate.',
     ].join('\n');
@@ -1044,31 +1045,41 @@ function buildIcs(list) {
       `DTSTAMP:${stamp}`,
       `DTSTART:${icsTime(l.dep.sched)}`,
       `DTEND:${icsTime(l.arr.sched)}`,
-      `SUMMARY:${icsEsc(`${l.flight} ${l.from} → ${l.to}`)}`,
+      `SUMMARY:${icsEsc(`${fno(l)} ${l.from} → ${l.to}`)}`,
       `LOCATION:${icsEsc(`${apName(l.from)} (${l.from})${dT ? `, ${dT}` : ''}`)}`,
       `DESCRIPTION:${icsEsc(desc)}`,
       'STATUS:CONFIRMED', 'TRANSP:OPAQUE',
-      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(`${l.flight} to ${l.to} leaves in 24 hours`)}`, 'TRIGGER:-PT24H', 'END:VALARM',
-      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(`${l.flight} to ${l.to} leaves in 3 hours. Check the gate in nyc.`)}`, 'TRIGGER:-PT3H', 'END:VALARM',
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(`${fno(l)} to ${l.to} leaves in 24 hours`)}`, 'TRIGGER:-PT24H', 'END:VALARM',
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(`${fno(l)} to ${l.to} leaves in 3 hours. Check the gate in nyc.`)}`, 'TRIGGER:-PT3H', 'END:VALARM',
       'END:VEVENT');
   }
   L.push('END:VCALENDAR');
   return L.map(fold).join('\r\n') + '\r\n';
 }
 const listText = a => a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
-function leftOutText(out) {
+// Why flights are missing from the file. Each line opens with a bold lead and names
+// flights by number; the list above already shows their routes.
+function leftOutLines(out) {
   const by = why => out.filter(o => o.why === why).map(o => o.l);
-  const rows = [];
   const un = by('unconfirmed'), nt = by('notimes'), fl = by('flown'), gone = by('past');
+  const nos = ls => listText(ls.map(N.flightNo));
   const days = ls => listText([...new Set(ls.map(legDay))].filter(d => d && d !== '—'));
-  if (fl.length) rows.push(`${listText(fl.map(l => l.flight || legName(l)))} already flew, so ${fl.length === 1 ? 'it’s' : 'they’re'} left out.`);
-  const gd = days(gone), ud = days(un);
-  if (gone.length) rows.push(`${listText(gone.map(legName))} ${gd ? `${gone.length === 1 ? 'was' : 'were'} on ${gd}` : `${gone.length === 1 ? 'is' : 'are'} in the past`}, so ${gone.length === 1 ? 'it’s' : 'they’re'} left out.`);
-  if (un.length) rows.push(`${listText(un.map(legName))}${ud ? ` (${ud})` : ''} ${un.length === 1 ? 'isn’t' : 'aren’t'} included: ${un.every(l => l.dir === 'ret') ? 'the flights home aren’t' : un.length === 1 ? 'it isn’t' : 'they aren’t'} confirmed yet. Come back here once ${un.length === 1 ? 'it is' : 'they are'}.`);
-  if (nt.length) rows.push(`${listText(nt.map(legName))} ${nt.length === 1 ? 'has' : 'have'} no scheduled times yet, so ${nt.length === 1 ? 'it’s' : 'they’re'} left out.`);
-  return rows;
+  const one = ls => ls.length === 1;
+  const rows = [];
+  if (fl.length) rows.push(['Left out:', `${nos(fl)} already flew.`]);
+  if (gone.length) {
+    const d = days(gone);
+    rows.push(['Left out:', `${nos(gone)} ${d ? `${one(gone) ? 'was' : 'were'} on ${d}` : `${one(gone) ? 'is' : 'are'} in the past`}.`]);
+  }
+  if (un.length) {
+    const d = days(un);
+    const who = !one(un) && un.every(l => l.dir === 'ret') ? `The flights home (${nos(un)}${d ? `, ${d}` : ''})` : `${nos(un)}${d ? ` (${d})` : ''}`;
+    rows.push(['Not included yet:', `${who} ${one(un) ? 'isn’t' : 'aren’t'} confirmed. Come back once ${one(un) ? 'it is' : 'they are'}.`]);
+  }
+  if (nt.length) rows.push(['Left out:', `${nos(nt)} ${one(nt) ? 'has' : 'have'} no scheduled times yet.`]);
+  return rows.map(([b, t]) => h`<b>${b}</b> ${t}`);
 }
-const leftOutHtml = out => leftOutText(out).map(t => h`<div class="co plain">${icon('info-circle')}<span>${t}</span></div>`);
+const leftOutHtml = out => leftOutLines(out).map(t => h`<div class="co plain">${icon('info-circle')}<span>${t}</span></div>`);
 let CAL = {text: ''};
 N.screen('calendar', {
   back: 'today', nav: false, uses: ['trip', 'guide', 'status'], title: 'Add to Calendar',
@@ -1080,13 +1091,13 @@ N.screen('calendar', {
     const t = N.data.trip;
     const asOf = t && t.updated_at ? N.date(t.updated_at, 'NYC') : null;
     const events = inc.map(l => h`<div class="rw c wl-r"><span class="ic">${icon('plane-departure')}</span><div class="grow">
-      <b>${legName(l)}</b><small>${legDay(l)} · ${N.time(l.dep.sched, l.from)} → ${N.time(l.arr.sched, l.to)} local</small>
+      <b>${legName(l)}</b><small>${N.mline(legDay(l), `${N.time(l.dep.sched, l.from)} → ${N.time(l.arr.sched, l.to)} local`)}</small>
       <small>${apName(l.from)}${termText(l.dep.terminal) ? `, ${termText(l.dep.terminal)}` : ''}</small></div></div>`);
     const add = !hasTrip
-      ? h`<div class="co plain">${icon('info-circle')}<span>Your flights appear here once the trip has loaded on this phone.</span></div>`
+      ? h`<div class="co plain">${icon('info-circle')}<span><b>Trip not loaded yet.</b> Your flights appear here once it has loaded on this phone.</span></div>`
       : inc.length
         ? h`<div class="wl-card wl-rows">${events}</div><p class="help">Each flight gets an alert the day before and 3 hours before.</p>`
-        : h`<div class="wl-card wl-empty"><b>Nothing to add right now</b>${(out.length ? leftOutText(out) : ['There are no upcoming flights with scheduled times.']).map(t => h`<p>${t}</p>`)}</div>`;
+        : h`<div class="wl-card wl-empty"><b>Nothing to add right now</b>${(out.length ? leftOutLines(out) : ['There are no upcoming flights with scheduled times.']).map(t => h`<p>${t}</p>`)}</div>`;
     return {
       hero: bar('Flights', 'calendar-plus', 'Add to Calendar'),
       body: h`<div class="wl wl-c">
@@ -1097,10 +1108,10 @@ N.screen('calendar', {
         </section>` : ''}
         ${sec('wl-c-what', 'What gets added', add, 1, rise)}
         ${out.length && inc.length ? h`<div class="stack8 wl-gap${rise ? ' rise' : ''}" style="animation-delay:90ms">${leftOutHtml(out)}</div>` : ''}
-        ${sec('wl-c-know', 'Good to know', h`<div class="wl-card wl-rows">
+        ${inc.length ? sec('wl-c-know', 'Good to know', h`<div class="wl-card wl-rows">
           <div class="rw c wl-r"><span class="ic">${icon('alert-triangle')}</span><div class="grow"><b>Calendar won’t update itself</b><small>Gate changes and delays show here, not in Calendar.</small></div></div>
           <div class="rw c wl-r"><span class="ic">${icon('calendar')}</span><div class="grow"><b>Scheduled times${asOf ? ` as of ${asOf}` : ''}</b><small>If the schedule changes, delete these events and add them again.</small></div></div>
-        </div>`, 3, rise)}
+        </div>`, 3, rise) : ''}
       </div>`,
     };
   },

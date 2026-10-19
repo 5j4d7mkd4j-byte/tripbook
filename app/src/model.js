@@ -91,6 +91,14 @@ N.legs = () => {
 N.leg = id => N.legs().find(l => l.id === id) || null;
 N.dirLegs = dir => N.legs().filter(l => l.dir === dir).sort((a, b) => a.seq - b.seq);
 
+// The feed still says scheduled but the clock says otherwise: 'air' once 20 min past departure,
+// 'down' from the scheduled landing, until state() calls it past. null when the feed is not behind.
+N.lagging = l => {
+  if (!l || l.state !== 'scheduled' || l.canceled || !l.dep.time) return null;
+  const now = N.now().getTime();
+  if (now <= T(l.dep.time) + 20 * 60000) return null;
+  return l.arr.time && now >= T(l.arr.time) ? 'down' : 'air';
+};
 // Short status words and a tone for chips: ok, warn, bad, neutral.
 N.legStatus = l => {
   if (!l) return {text: '—', tone: 'neutral'};
@@ -99,9 +107,13 @@ N.legStatus = l => {
   if (l.route_ok === false) return {text: 'Needs checking', tone: 'warn'};
   if (l.state === 'landed') return {text: 'Landed', tone: 'ok'};
   if (l.state === 'air') return {text: l.delay_arr > 14 ? `In the air · ${N.dur(l.delay_arr)} late` : 'In the air', tone: l.delay_arr > 14 ? 'warn' : 'ok'};
+  if (l.state === 'past') return {text: 'Done', tone: 'neutral'};
   if (l.state === 'boarding') return {text: 'Boarding', tone: 'ok'};
+  const lag = N.lagging(l);
+  if (lag) return {text: lag === 'down' ? 'Likely landed' : 'Likely in the air', tone: 'neutral'};
   if (l.delay_dep > 14) return {text: `Delayed ${N.dur(l.delay_dep)}`, tone: 'warn'};
-  if (!l.live) return {text: l.confirmed === false ? 'Not confirmed' : 'Scheduled', tone: 'neutral'};
+  // Old data earns no green: 'On time' from a stale check reads as plain 'Scheduled'.
+  if (!l.live || (typeof N.fresh === 'function' && N.fresh().level === 'stale')) return {text: l.confirmed === false ? 'Not confirmed' : 'Scheduled', tone: 'neutral'};
   return {text: l.delay_dep > 4 ? `${l.delay_dep} min late` : 'On time', tone: 'ok'};
 };
 
@@ -232,6 +244,13 @@ N.dirLabel = d => d === 'out' ? 'To New York' : 'Home';
 
 // ---------- leave times ----------
 // Outbound: home to PHX. Return: hotel to LGA, using the live drive estimate when there is one.
+// Minutes by car to the airport: a live traffic reading on the way to LGA, else the guide's plan.
+// Known without flight times, so the return day can quote the drive before AA posts them.
+N.drive = dir => {
+  const g = N.data.guide && N.data.guide.plan && N.data.guide.plan[dir] || {};
+  const tr = dir === 'ret' && N.data.status && N.data.status.traffic && N.data.status.traffic.to_lga;
+  return tr && tr.min ? {min: tr.min, source: 'traffic'} : {min: g.drive_min || (dir === 'out' ? 25 : 35), source: 'typical'};
+};
 N.leave = dir => {
   const legs = N.dirLegs(dir);
   const first = legs[0];
@@ -239,9 +258,7 @@ N.leave = dir => {
   const buf = +N.prefs().leave_buffer || 0;
   const g = N.data.guide && N.data.guide.plan && N.data.guide.plan[dir] || {};
   const arriveBefore = g.arrive_before_min || (dir === 'out' ? 105 : 100);
-  let drive = g.drive_min || (dir === 'out' ? 25 : 35), source = 'typical';
-  const tr = N.data.status && N.data.status.traffic && N.data.status.traffic.to_lga;
-  if (dir === 'ret' && tr && tr.min) { drive = tr.min; source = 'traffic'; }
+  const {min: drive, source} = N.drive(dir);
   const at = N.addMin(first.dep.time, -(arriveBefore + drive + buf));
   return {at, arrive: N.addMin(first.dep.time, -arriveBefore), drive, arriveBefore, buffer: buf, source, leg: first,
     bagdrop: N.addMin(first.dep.time, -N.AA.bagdrop)};
@@ -266,8 +283,8 @@ N.changes = () => {
     const add = (k, text) => out.push({leg: l, k, text});
     if (n.c && !s.c) add('c', `${l.flight} is canceled`);
     if (n.v && !s.v) add('v', `${l.flight} diverted to ${n.v}`);
-    if (n.dg && s.dg && n.dg !== s.dg) add('dg', `${l.flight} gate ${s.dg} → ${n.dg}`);
-    if (n.dt && s.dt && n.dt !== s.dt) add('dt', `${l.flight} terminal ${s.dt} → ${n.dt}`);
+    if (n.dg && s.dg && n.dg !== s.dg) add('dg', `${l.flight} now leaves from gate ${n.dg} (was ${s.dg})`);
+    if (n.dt && s.dt && n.dt !== s.dt) add('dt', `${l.flight} now leaves from terminal ${n.dt} (was ${s.dt})`);
     if (n.ag && s.ag && n.ag !== s.ag) add('ag', `${l.flight} arrives at gate ${n.ag} (was ${s.ag})`);
     if (n.bg && s.bg && n.bg !== s.bg) add('bg', `${l.flight} bags now carousel ${n.bg}`);
     if (n.d && s.d && Math.abs(n.d - s.d) >= 5) add('d', `${l.flight} now leaves ${N.time(l.dep.time, l.from)} (${n.d > s.d ? '+' : '−'}${N.dur(n.d - s.d)})`);
