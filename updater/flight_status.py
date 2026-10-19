@@ -549,11 +549,20 @@ def skip_reason(leg, old, now):
     return None
 
 
-def check_leg(leg, old, now_dt, fetch=True):
+def direct(name, fn, *args):
+    """The default ask hook: every lookup goes straight to its source."""
+    return fn(*args)
+
+
+def check_leg(leg, old, now_dt, fetch=True, ask=None):
     """One leg's status doc. old is that leg's doc from the previous run (or {}).
 
+    ask(name, fn, *args) makes each lookup (name: flightstats|flightview|inbound),
+    so a caller can pace them (run.py's minute loop backs off a failing source).
+    A skipped source answers ('fail', why); a skipped inbound lookup answers None.
     Returns (doc, notes, outcome) with outcome in checked|carried|failed|route.
     """
+    ask = ask or direct
     now = iso_utc(now_dt)
     base = {"flight": norm_flight(leg["flight"]), "date": leg["date"],
             "from": leg["from"], "to": leg["to"]}
@@ -569,8 +578,8 @@ def check_leg(leg, old, now_dt, fetch=True):
     if not fetch:
         return mark_failed(carried, now_dt), [f"{leg['id']}: not checked (time budget used up)"], "failed"
 
-    fs_kind, fs_val = fs_check(leg)
-    fv_kind, fv_val = fv_check(leg)
+    fs_kind, fs_val = ask("flightstats", fs_check, leg)
+    fv_kind, fv_val = ask("flightview", fv_check, leg)
     notes = [f"{leg['id']}: {v}" for k, v in ((fs_kind, fs_val), (fv_kind, fv_val)) if k == "fail"]
 
     if "ok" not in (fs_kind, fv_kind):
@@ -620,7 +629,11 @@ def check_leg(leg, old, now_dt, fetch=True):
     dep_at = parse_iso(best(doc, "dep"))
     inb = doc.get("inbound")
     if inb and not doc.get("departed") and dep_at and now_dt < dep_at <= now_dt + INBOUND_AHEAD:
-        doc["inbound"] = fs_inbound(inb, leg)
+        got = ask("inbound", fs_inbound, inb, leg)
+        if got is None:  # not looked up this time: keep what the last lookup added
+            was = good_old.get("inbound") or {}
+            got = dict(was, **inb) if was.get("flight") == inb.get("flight") else inb
+        doc["inbound"] = got
 
     doc.update(route_ok=True, route_seen=None, fetch_failed=False, checked_at=now)
     if good_old:
@@ -634,12 +647,12 @@ def check_leg(leg, old, now_dt, fetch=True):
     return doc, notes, "checked"
 
 
-def update_legs(legs, prev_legs, now_dt, deadline=None):
+def update_legs(legs, prev_legs, now_dt, deadline=None, ask=None):
     """Check every planned leg. Returns (legs_doc, notes, counts).
 
     prev_legs is the previous status's legs map. deadline (time.monotonic())
     stops new lookups so a slow source cannot push the run past its timeout;
-    legs not reached keep their last values with fetch_failed.
+    legs not reached keep their last values with fetch_failed. ask: see check_leg.
     """
     out, notes = {}, []
     counts = {"checked": 0, "carried": 0, "failed": 0, "route": 0}
@@ -648,7 +661,7 @@ def update_legs(legs, prev_legs, now_dt, deadline=None):
         ok_time = deadline is None or time.monotonic() < deadline
         old = (prev_legs or {}).get(lid) or {}
         try:
-            doc, n, kind = check_leg(leg, old, now_dt, fetch=ok_time)
+            doc, n, kind = check_leg(leg, old, now_dt, fetch=ok_time, ask=ask)
         except Exception as e:  # one leg never stops the rest: keep its last doc
             base = {k: leg.get(k) for k in ("flight", "date", "from", "to")}
             try:

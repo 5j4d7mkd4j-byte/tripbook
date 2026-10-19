@@ -2,9 +2,11 @@
 
 GitHub Actions (`.github/workflows/live.yml`) is the main updater. This Mac job is
 the backup: launchd starts `run_mac.sh` every 10 minutes, `run.py` checks whether a
-run is due (travel window, or a 2-hour slow tick between 18 and 30 Oct) and skips
-when the cloud published a good status in the last 12 minutes (2 h 5 min on slow
-ticks). It only runs while the Mac is awake and logged in.
+run is due (travel window, or an hourly slow tick in the days around the trip) and
+skips when the cloud published a good status in the last 12 minutes (1 h 5 min on
+slow ticks). It only runs while the Mac is awake and logged in. It does not run the
+minute loop: in a hot window (the hours before a departure) the cloud checks every
+minute and the Mac stands down, and if the cloud stops it checks every 10 minutes.
 
 ## Before you start
 

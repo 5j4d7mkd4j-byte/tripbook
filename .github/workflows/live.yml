@@ -1,16 +1,18 @@
 # Checks the trip's flights and conditions, then publishes the sealed
 # status.bin to the orphan "live" branch that the app reads.
-# updater/run.py decides whether a run is due (travel windows, slow ticks),
-# so scheduled runs outside the windows end in seconds without any lookups.
-# Logs carry counts only; flight details exist only inside the sealed file.
+# updater/run.py decides what a run does: inside a hot window (the hours before
+# a departure) one job checks every minute until takeoff; in the travel windows
+# a run checks once; on the other days around the trip, once an hour. Scheduled
+# runs outside all of these end in seconds without any lookups.
+# Logs carry counts and mode words only; flight details exist only inside the sealed file.
 name: live status
 
 on:
   schedule:
     # Deliberately generic (the repo is public, so no travel dates here):
     # run.py reads the sealed trip and ends at once outside the windows.
-    - cron: "*/10 * * 10,11 *"   # every 10 min; only travel windows do lookups
-    - cron: "5 */2 * 10,11 *"    # every 2 h: slow mode in the days around the trip
+    - cron: "4-59/10 * * 10,11 *"   # every 10 min; travel windows check, hot windows start the minute loop
+    - cron: "17 * * 10,11 *"        # hourly: slow mode in the days around the trip
   workflow_dispatch:
     inputs:
       force:
@@ -21,6 +23,8 @@ on:
 permissions:
   contents: write   # push to the live branch
 
+# One run at a time. While the minute loop runs, the next scheduled run waits
+# (only the newest waiting run is kept) and takes over when the loop ends.
 concurrency:
   group: live-status
   cancel-in-progress: false
@@ -28,7 +32,12 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 350   # the minute loop; GitHub's limit for a job is 360
+    env:
+      # The slow cron is itself the hourly tick, so any minute of it counts
+      # (Actions often starts scheduled runs late).
+      SLOW: ${{ github.event.schedule == '17 * * 10,11 *' }}
+      FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,18 +47,40 @@ jobs:
         with:
           node-version: 20
 
-      - name: Check flights and conditions
+      # hot | travel | slow | idle. A hot window starting within 15 min counts as hot.
+      - name: Decide
+        id: decide
+        timeout-minutes: 5
         env:
           TRIP_KEY: ${{ secrets.TRIP_KEY }}
-          # The slow cron is itself the 2-hour tick, so any minute of it counts
-          # (Actions often starts scheduled runs late).
-          SLOW: ${{ github.event.schedule == '5 */2 * 10,11 *' }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: |
+          mode=$(python3 updater/run.py --mode) || mode=travel
+          echo "mode: $mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Check flights and conditions
+        id: once
+        if: >-
+          steps.decide.outputs.mode != 'hot' &&
+          (steps.decide.outputs.mode == 'travel' || env.SLOW == 'true' || env.FORCE == 'true')
+        timeout-minutes: 8
+        env:
+          TRIP_KEY: ${{ secrets.TRIP_KEY }}
         run: |
           args=(--source actions)
-          if [ "$SLOW" = "true" ]; then args+=(--slow --slow-minutes 120); fi
+          if [ "$SLOW" = "true" ]; then args+=(--slow --slow-minutes 60); fi
           if [ "$FORCE" = "true" ]; then args+=(--force); fi
           python3 updater/run.py "${args[@]}"
 
       - name: Publish status.bin
+        if: steps.once.outcome == 'success'
         run: bash updater/publish.sh
+
+      # Checks every minute and publishes each time until the window ends
+      # (run.py stops itself after 330 min; the next scheduled run carries on).
+      - name: Check every minute
+        if: steps.decide.outputs.mode == 'hot'
+        timeout-minutes: 340
+        env:
+          TRIP_KEY: ${{ secrets.TRIP_KEY }}
+        run: python3 updater/run.py --source actions --loop

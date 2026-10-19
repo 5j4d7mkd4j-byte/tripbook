@@ -1,7 +1,7 @@
 #!/bin/bash
 # launchd entry point for the Mac backup updater (see install.md).
 # launchd starts it every 10 minutes. run.py decides whether a run is due and
-# skips when the cloud published a good status in the last 12 minutes (2 h 5 min
+# skips when the cloud published a good status in the last 12 minutes (1 h 5 min
 # in slow mode), so the Mac only does real work when GitHub Actions is late or failing.
 set -u
 
