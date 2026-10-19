@@ -1020,7 +1020,7 @@ async function createGL(ml, box, P, st, hooks) {
   map.on('error', e => { st.lastError = e && e.error; });
   const G = {map, specs: specs(lat), theme: null, route: undefined, endRefs: [], kind: 'gl'};
   await new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error('map did not load')), 15000);
+    const t = setTimeout(() => { try { map.remove(); } catch (e) { /* already gone */ } rej(new Error('map did not load')); }, 15000);
     map.once('load', () => { clearTimeout(t); res(); });
   });
   for (const k of SOURCES) map.addSource(S(k), {type: 'geojson', data: P.geo[k] || EMPTY, buffer: 64, tolerance: .2});

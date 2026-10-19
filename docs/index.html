@@ -13,7 +13,7 @@
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">
 <!-- Only these hosts can ever be contacted, so nothing typed into the Wallet can leave the phone. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.yelpcdn.com https://*.basemaps.cartocdn.com; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://*.yelpcdn.com https://*.basemaps.cartocdn.com; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.yelpcdn.com https://*.basemaps.cartocdn.com; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://*.yelpcdn.com https://*.basemaps.cartocdn.com; font-src 'self'; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -2233,7 +2233,7 @@ try { const t = JSON.parse(localStorage.getItem('nyc.theme')); if (t === 'light'
   <nav class="nv off" aria-label="Sections"><div class="nvi"><span class="nvp none"></span></div></nav>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
-<script>window.__CFG = {"build":"3aeca4dff1","vapid":"BCkV9tH1ZfcoGUxVZsIgTKtN2d3KPIm1Ow84b6Ipfull4mCPB4stL6zKFrwmhRyuSKFWeCSyfP199x0dW14Reqs"};</script>
+<script>window.__CFG = {"build":"0a3f3fbef8","vapid":"BCkV9tH1ZfcoGUxVZsIgTKtN2d3KPIm1Ow84b6Ipfull4mCPB4stL6zKFrwmhRyuSKFWeCSyfP199x0dW14Reqs"};</script>
 <script>
 /* core.js */
 /* Core runtime: helpers, device storage, decryption, data loading and polling,
@@ -5708,7 +5708,7 @@ async function createGL(ml, box, P, st, hooks) {
   map.on('error', e => { st.lastError = e && e.error; });
   const G = {map, specs: specs(lat), theme: null, route: undefined, endRefs: [], kind: 'gl'};
   await new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error('map did not load')), 15000);
+    const t = setTimeout(() => { try { map.remove(); } catch (e) { /* already gone */ } rej(new Error('map did not load')); }, 15000);
     map.once('load', () => { clearTimeout(t); res(); });
   });
   for (const k of SOURCES) map.addSource(S(k), {type: 'geojson', data: P.geo[k] || EMPTY, buffer: 64, tolerance: .2});
